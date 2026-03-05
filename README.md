@@ -1,6 +1,6 @@
 # Ceramic Stamps Processor
 
-A web-based tool for extracting individual motifs from scanned pages of Lithuanian ceramic stamp patterns, converting them to clean SVGs, and generating 3D-printable `.3mf` stamp files.
+A web-based tool for extracting symbols, shapes, and motifs from images or vector files, converting them to clean SVGs, and generating 3D-printable `.3mf` ceramic debossing stamps.
 
 ## Features
 

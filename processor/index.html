@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stamp Extractor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+
+.toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; background: #16213e; border-bottom: 1px solid #0f3460;
+}
+.toolbar h1 { font-size: 16px; font-weight: 600; margin-right: 12px; color: #e94560; }
+.toolbar button, .toolbar label {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 13px;
+}
+.toolbar button:hover, .toolbar label:hover { background: #0f3460; }
+.toolbar button.active { background: #e94560; border-color: #e94560; color: #fff; }
+.toolbar .spacer { flex: 1; }
+.toolbar .hint { font-size: 12px; color: #888; }
+
+#file-input { display: none; }
+
+.canvas-wrap {
+  position: relative; overflow: hidden;
+  background: #111; cursor: crosshair;
+  height: 50vh; min-height: 200px;
+}
+#canvas { position: absolute; top: 0; left: 0; image-rendering: pixelated; }
+
+.gallery {
+  background: #16213e; border-top: 1px solid #0f3460;
+  padding: 12px 16px; min-height: 200px;
+}
+.gallery-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+}
+.gallery-header h2 { font-size: 14px; font-weight: 600; }
+.gallery-header .count { font-size: 13px; color: #888; }
+
+.preview-row {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 120px;
+}
+.preview-row .nav-btn {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;
+  font-size: 18px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.preview-row .nav-btn:hover { background: #0f3460; }
+.preview-row .nav-btn:disabled { opacity: 0.3; cursor: default; }
+
+.preview-card {
+  flex: 1; display: flex; align-items: center; gap: 16px;
+  background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px;
+  padding: 12px; min-height: 100px;
+}
+.preview-card .svg-display {
+  width: 140px; height: 100px; background: #fff; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.preview-card .svg-display svg { max-width: 130px; max-height: 90px; }
+.preview-card .svg-display img { max-width: 130px; max-height: 90px; }
+.preview-card .actions { display: flex; flex-direction: column; gap: 8px; }
+.preview-card .actions button {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 13px;
+  white-space: nowrap;
+}
+.preview-card .actions button:hover { background: #0f3460; }
+.preview-card .actions button.primary { background: #e94560; border-color: #e94560; color: #fff; }
+.preview-card .actions button.primary:hover { background: #c73550; }
+.preview-card .info { font-size: 12px; color: #888; }
+
+.empty-state {
+  display: flex; align-items: center; justify-content: center;
+  height: 100px; color: #555; font-size: 14px;
+}
+
+.thumbstrip {
+  display: flex; gap: 6px; margin-top: 10px; overflow-x: auto;
+  padding-bottom: 4px;
+}
+.thumb {
+  width: 48px; height: 48px; border-radius: 4px; flex-shrink: 0;
+  border: 2px solid #0f3460; background: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.thumb.active { border-color: #e94560; }
+.thumb svg, .thumb img { max-width: 40px; max-height: 40px; }
+.thumb .label {
+  position: absolute; bottom: 1px; right: 2px;
+  font-size: 9px; color: #333; font-weight: 700;
+}
+.thumb.processing {
+  border-color: #f0a500;
+}
+.thumb.processing::after {
+  content: ""; position: absolute;
+  width: 16px; height: 16px; border: 2px solid #f0a500;
+  border-top-color: transparent; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.stamp-spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid #fff; border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  vertical-align: middle; margin-right: 4px;
+}
+
+/* Eraser modal */
+.eraser-overlay {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.85);
+  flex-direction: column; align-items: center; justify-content: center;
+}
+.eraser-overlay.open { display: flex; }
+.eraser-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #16213e; border-radius: 8px 8px 0 0;
+  width: fit-content;
+}
+.eraser-toolbar label { font-size: 13px; color: #ccc; }
+.eraser-toolbar input[type=range] { width: 120px; accent-color: #e94560; }
+.eraser-toolbar .brush-size { font-size: 13px; color: #e94560; min-width: 30px; }
+.eraser-toolbar button {
+  padding: 6px 16px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 13px;
+}
+.eraser-toolbar button.primary { background: #e94560; border-color: #e94560; color: #fff; }
+.eraser-toolbar button.primary:hover { background: #c73550; }
+.eraser-canvas-wrap {
+  background: #fff; border: 2px solid #0f3460; border-top: none;
+  border-radius: 0 0 8px 8px; overflow: hidden;
+  max-width: 90vw; max-height: 70vh;
+}
+.eraser-canvas-wrap canvas { display: block; cursor: none; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Stamp Extractor</h1>
+  <label for="file-input" id="file-label">Choose File</label>
+  <input type="file" id="file-input" accept="image/*,.eps,.ps,.ai">
+  <button id="btn-rect" class="active" onclick="setTool('rect')">Rectangle</button>
+  <button id="btn-circle" onclick="setTool('circle')">Circle</button>
+  <div class="spacer"></div>
+  <span class="hint" id="status-hint">Load an image to begin</span>
+</div>
+
+<div class="canvas-wrap" id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+</div>
+
+<div class="gallery">
+  <div class="gallery-header">
+    <h2>Extractions</h2>
+    <span class="count" id="gallery-count"></span>
+  </div>
+  <div class="preview-row" id="preview-row" style="display:none">
+    <button class="nav-btn" id="btn-prev" onclick="navGallery(-1)">&#9664;</button>
+    <div class="preview-card" id="preview-card">
+      <div class="svg-display" id="svg-display"></div>
+      <div>
+        <div class="actions">
+          <button onclick="openEraser()">Erase</button>
+          <button onclick="invertExtraction()">Invert</button>
+          <button onclick="fillHoles()">Fill Holes</button>
+          <button onclick="downloadSvg()">Download SVG</button>
+          <button class="primary" id="btn-3mf" onclick="generateStamp()">Generate .3mf</button>
+        </div>
+        <div class="info" id="preview-info"></div>
+      </div>
+    </div>
+    <button class="nav-btn" id="btn-next" onclick="navGallery(1)">&#9654;</button>
+  </div>
+  <div class="empty-state" id="empty-state">Draw selections on the image to extract stamp patterns</div>
+  <div class="thumbstrip" id="thumbstrip"></div>
+</div>
+
+<div class="eraser-overlay" id="eraser-overlay">
+  <div class="eraser-toolbar">
+    <label>Brush:</label>
+    <input type="range" id="eraser-brush-size" min="3" max="60" value="15">
+    <span class="brush-size" id="eraser-brush-label">15px</span>
+    <button onclick="applyEraser()" class="primary">Apply</button>
+    <button onclick="closeEraser()">Cancel</button>
+  </div>
+  <div class="eraser-canvas-wrap">
+    <canvas id="eraser-canvas"></canvas>
+  </div>
+</div>
+<div id="eraser-cursor" style="display:none;position:fixed;pointer-events:none;border:2px solid #333;box-shadow:0 0 0 1px #fff;border-radius:50%;z-index:200;"></div>
+
+<script>
+// ── State ──
+let imageId = null;
+let imgW = 0, imgH = 0;
+let baseName = 'extract';  // derived from uploaded filename
+const results = []; // {id, svg, name, el}
+let currentIdx = -1;
+let tool = 'rect';
+
+// Canvas/viewport state
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvas-wrap');
+let img = null;
+let zoom = 1, panX = 0, panY = 0;
+let dragging = false, dragStart = null, dragEnd = null;
+let panning = false, panStart = null, panStartX = 0, panStartY = 0;
+
+// Move state
+let moving = false, movingIdx = -1, moveOffsetX = 0, moveOffsetY = 0;
+
+// Selection overlays stored for redraw
+const selections = []; // {x, y, w, h, shape, color}
+const colors = ['#e94560','#f0a500','#00b4d8','#06d6a0','#9b5de5','#f15bb5','#fee440','#00f5d4'];
+
+function setTool(t) {
+  tool = t;
+  document.getElementById('btn-rect').classList.toggle('active', t === 'rect');
+  document.getElementById('btn-circle').classList.toggle('active', t === 'circle');
+}
+
+// ── Hit-test: find selection under cursor (topmost = last drawn) ──
+function hitTestSelection(ix, iy) {
+  for (let i = selections.length - 1; i >= 0; i--) {
+    const s = selections[i];
+    if (s.shape === 'circle') {
+      // Ellipse hit-test
+      const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+      const rx = s.w / 2, ry = s.h / 2;
+      if (rx > 0 && ry > 0) {
+        const dx = (ix - cx) / rx, dy = (iy - cy) / ry;
+        if (dx * dx + dy * dy <= 1) return i;
+      }
+    } else {
+      if (ix >= s.x && ix <= s.x + s.w && iy >= s.y && iy <= s.y + s.h) return i;
+    }
+  }
+  return -1;
+}
+
+// ── File upload ──
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const hint = document.getElementById('status-hint');
+  hint.textContent = 'Uploading' + (file.name.match(/\.(eps|ps|ai)$/i) ? ' (converting EPS...)' : '...');
+  const form = new FormData();
+  form.append('file', file);
+
+  let data;
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: form });
+    data = await res.json();
+  } catch (err) {
+    hint.textContent = 'Upload failed: ' + err.message;
+    return;
+  }
+  if (data.error) {
+    hint.textContent = data.error;
+    return;
+  }
+
+  imageId = data.id;
+  imgW = data.width;
+  imgH = data.height;
+  baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+
+  img = new Image();
+  img.onload = () => {
+    fitImage();
+    draw();
+    document.getElementById('status-hint').textContent =
+      `${imgW}×${imgH} — draw selections to extract`;
+    document.getElementById('file-label').textContent = file.name;
+  };
+  img.onerror = () => {
+    document.getElementById('status-hint').textContent = 'Image loaded on server but failed to display — try selecting regions anyway';
+    // Still usable for extraction even if canvas preview fails
+    fitImage();
+  };
+  img.src = `/image/${imageId}`;
+
+  // Reset state
+  selections.length = 0;
+  results.length = 0;
+  currentIdx = -1;
+  updateGallery();
+});
+
+function fitImage() {
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+  zoom = Math.min(wW / imgW, wH / imgH, 1);
+  panX = (wW - imgW * zoom) / 2;
+  panY = (wH - imgH * zoom) / 2;
+}
+
+// ── Drawing ──
+function draw() {
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+  canvas.width = wW;
+  canvas.height = wH;
+  ctx.clearRect(0, 0, wW, wH);
+
+  if (!img) return;
+
+  ctx.save();
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+  ctx.drawImage(img, 0, 0, imgW, imgH);
+
+  // Draw existing selections
+  selections.forEach((sel, i) => {
+    const isMoving = moving && i === movingIdx;
+    ctx.strokeStyle = isMoving ? '#fff' : sel.color;
+    ctx.lineWidth = (isMoving ? 3 : 2) / zoom;
+    ctx.setLineDash([6 / zoom, 3 / zoom]);
+    if (sel.shape === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse(sel.x + sel.w / 2, sel.y + sel.h / 2, sel.w / 2, sel.h / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+    }
+    ctx.setLineDash([]);
+    // Semi-transparent fill while moving
+    if (isMoving) {
+      ctx.fillStyle = 'rgba(233,69,96,0.15)';
+      if (sel.shape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(sel.x + sel.w / 2, sel.y + sel.h / 2, sel.w / 2, sel.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(sel.x, sel.y, sel.w, sel.h);
+      }
+    }
+    // Label
+    ctx.fillStyle = sel.color;
+    ctx.font = `bold ${14 / zoom}px sans-serif`;
+    ctx.fillText(i + 1, sel.x + 3 / zoom, sel.y - 4 / zoom);
+  });
+
+  // Draw current drag (new selection)
+  if (dragging && dragStart && dragEnd) {
+    const x = Math.min(dragStart.x, dragEnd.x);
+    const y = Math.min(dragStart.y, dragEnd.y);
+    const w = Math.abs(dragEnd.x - dragStart.x);
+    const h = Math.abs(dragEnd.y - dragStart.y);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2 / zoom;
+    ctx.setLineDash([6 / zoom, 3 / zoom]);
+    if (tool === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(x, y, w, h);
+    }
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
+// Convert screen coords to image coords
+function screenToImage(sx, sy) {
+  return {
+    x: (sx - panX) / zoom,
+    y: (sy - panY) / zoom,
+  };
+}
+
+// ── Mouse events ──
+canvas.addEventListener('mousedown', (e) => {
+  if (!img) return;
+  // Middle button = pan
+  if (e.button === 1) {
+    panning = true;
+    panStart = { x: e.offsetX, y: e.offsetY };
+    panStartX = panX;
+    panStartY = panY;
+    e.preventDefault();
+    return;
+  }
+  if (e.button !== 0) return;
+
+  const pt = screenToImage(e.offsetX, e.offsetY);
+
+  // Check if clicking on an existing selection → move it
+  const hitIdx = hitTestSelection(pt.x, pt.y);
+  if (hitIdx >= 0) {
+    moving = true;
+    movingIdx = hitIdx;
+    moveOffsetX = pt.x - selections[hitIdx].x;
+    moveOffsetY = pt.y - selections[hitIdx].y;
+    canvas.style.cursor = 'grabbing';
+    draw();
+    return;
+  }
+
+  // Otherwise start drawing a new selection
+  dragging = true;
+  dragStart = pt;
+  dragEnd = pt;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (panning) {
+    panX = panStartX + (e.offsetX - panStart.x);
+    panY = panStartY + (e.offsetY - panStart.y);
+    draw();
+    return;
+  }
+  if (moving) {
+    const pt = screenToImage(e.offsetX, e.offsetY);
+    const sel = selections[movingIdx];
+    sel.x = Math.round(pt.x - moveOffsetX);
+    sel.y = Math.round(pt.y - moveOffsetY);
+    draw();
+    return;
+  }
+  if (dragging) {
+    dragEnd = screenToImage(e.offsetX, e.offsetY);
+    draw();
+    return;
+  }
+
+  // Cursor hint: show grab when hovering over a selection
+  if (img) {
+    const pt = screenToImage(e.offsetX, e.offsetY);
+    canvas.style.cursor = hitTestSelection(pt.x, pt.y) >= 0 ? 'grab' : 'crosshair';
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (panning) { panning = false; return; }
+
+  // Finish moving
+  if (moving) {
+    const idx = movingIdx;
+    moving = false;
+    movingIdx = -1;
+    canvas.style.cursor = 'crosshair';
+    draw();
+    // Re-extract at new position
+    reExtract(idx);
+    return;
+  }
+
+  if (!dragging) return;
+  dragging = false;
+
+  const x = Math.min(dragStart.x, dragEnd.x);
+  const y = Math.min(dragStart.y, dragEnd.y);
+  const w = Math.abs(dragEnd.x - dragStart.x);
+  const h = Math.abs(dragEnd.y - dragStart.y);
+
+  if (w < 5 || h < 5) { draw(); return; } // too small
+
+  const color = colors[selections.length % colors.length];
+  const sel = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), shape: tool, color };
+  selections.push(sel);
+  draw();
+  extractRegion(sel, selections.length);
+});
+
+// Right-click to delete a selection
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (!img) return;
+  const pt = screenToImage(e.offsetX, e.offsetY);
+  const hitIdx = hitTestSelection(pt.x, pt.y);
+  if (hitIdx >= 0) {
+    selections.splice(hitIdx, 1);
+    results.splice(hitIdx, 1);
+    if (currentIdx >= results.length) currentIdx = results.length - 1;
+    draw();
+    updateGallery();
+  }
+});
+
+// Zoom with scroll wheel
+wrap.addEventListener('wheel', (e) => {
+  if (!img) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const mx = e.offsetX, my = e.offsetY;
+  // Zoom toward cursor
+  panX = mx - (mx - panX) * factor;
+  panY = my - (my - panY) * factor;
+  zoom *= factor;
+  draw();
+}, { passive: false });
+
+// ── Extract region ──
+async function extractRegion(sel, num) {
+  const idx = results.length;
+  const name = `${baseName}-extract-${num}`;
+  results.push({ id: null, svg: null, name, processing: true });
+  updateGallery();
+
+  try {
+    const res = await fetch('/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_id: imageId,
+        x: sel.x, y: sel.y, w: sel.w, h: sel.h,
+        shape: sel.shape,
+        name,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      results[idx] = { id: null, svg: null, name, error: data.error, processing: false };
+    } else {
+      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
+    }
+  } catch (err) {
+    results[idx] = { id: null, svg: null, name, error: err.message, processing: false };
+  }
+
+  if (currentIdx === -1 || currentIdx === idx) {
+    currentIdx = idx;
+  }
+  updateGallery();
+}
+
+// Re-extract after moving a selection
+async function reExtract(selIdx) {
+  const sel = selections[selIdx];
+  if (!sel) return;
+  const name = results[selIdx] ? results[selIdx].name : `${baseName}-extract-${selIdx + 1}`;
+  results[selIdx] = { id: null, svg: null, name, processing: true };
+  updateGallery();
+
+  try {
+    const res = await fetch('/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_id: imageId,
+        x: sel.x, y: sel.y, w: sel.w, h: sel.h,
+        shape: sel.shape,
+        name,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      results[selIdx] = { id: null, svg: null, name, error: data.error, processing: false };
+    } else {
+      results[selIdx] = { id: data.id, svg: data.svg, name, processing: false };
+    }
+  } catch (err) {
+    results[selIdx] = { id: null, svg: null, name, error: err.message, processing: false };
+  }
+  currentIdx = selIdx;
+  updateGallery();
+}
+
+// ── Gallery ──
+function updateGallery() {
+  const countEl = document.getElementById('gallery-count');
+  const emptyEl = document.getElementById('empty-state');
+  const previewRow = document.getElementById('preview-row');
+  const strip = document.getElementById('thumbstrip');
+
+  const finished = results.filter(r => r.svg).length;
+  countEl.textContent = results.length > 0 ? `${currentIdx + 1} / ${results.length} (${finished} done)` : '';
+
+  if (results.length === 0) {
+    emptyEl.style.display = 'flex';
+    previewRow.style.display = 'none';
+    strip.innerHTML = '';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  previewRow.style.display = 'flex';
+
+  // Preview card
+  const r = results[currentIdx] || results[0];
+  const display = document.getElementById('svg-display');
+  const info = document.getElementById('preview-info');
+
+  if (r.processing) {
+    display.innerHTML = '<div class="stamp-spinner"></div>';
+    info.textContent = 'Processing...';
+  } else if (r.error) {
+    display.innerHTML = '<span style="color:#e94560;font-size:12px">Error</span>';
+    info.textContent = r.error;
+  } else if (r.svg) {
+    display.innerHTML = r.svg;
+    // Scale SVG to fit
+    const svgEl = display.querySelector('svg');
+    if (svgEl) {
+      svgEl.removeAttribute('width');
+      svgEl.removeAttribute('height');
+      svgEl.style.maxWidth = '130px';
+      svgEl.style.maxHeight = '90px';
+    }
+    info.textContent = r.name;
+  }
+
+  document.getElementById('btn-prev').disabled = currentIdx <= 0;
+  document.getElementById('btn-next').disabled = currentIdx >= results.length - 1;
+  updateStampButton();
+
+  // Thumbnails
+  strip.innerHTML = '';
+  results.forEach((r, i) => {
+    const t = document.createElement('div');
+    t.className = 'thumb' + (i === currentIdx ? ' active' : '') + (r.processing ? ' processing' : '');
+    if (r.svg && !r.processing) {
+      t.innerHTML = r.svg;
+      const svgEl = t.querySelector('svg');
+      if (svgEl) {
+        svgEl.removeAttribute('width');
+        svgEl.removeAttribute('height');
+        svgEl.style.maxWidth = '40px';
+        svgEl.style.maxHeight = '40px';
+      }
+    }
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = i + 1;
+    t.appendChild(label);
+    t.onclick = () => { currentIdx = i; updateGallery(); };
+    strip.appendChild(t);
+  });
+}
+
+function navGallery(dir) {
+  const next = currentIdx + dir;
+  if (next >= 0 && next < results.length) {
+    currentIdx = next;
+    updateGallery();
+  }
+}
+
+// ── Download SVG ──
+function downloadSvg() {
+  const r = results[currentIdx];
+  if (!r || !r.svg) return;
+  const blob = new Blob([r.svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = r.name + '.svg';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Invert B&W ──
+async function invertExtraction() {
+  const idx = currentIdx;
+  const r = results[idx];
+  if (!r || !r.id) return;
+
+  r.processing = true;
+  delete stampJobs[idx];
+  updateGallery();
+
+  try {
+    const res = await fetch('/invert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extraction_id: r.id }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      r.error = data.error;
+    } else {
+      r.svg = data.svg;
+    }
+  } catch (err) {
+    r.error = err.message;
+  }
+  r.processing = false;
+  updateGallery();
+}
+
+// ── Fill Holes ──
+async function fillHoles() {
+  const idx = currentIdx;
+  const sel = selections[idx];
+  if (!sel || !imageId) return;
+
+  const name = results[idx] ? results[idx].name : `${baseName}-extract-${idx + 1}`;
+  results[idx] = { id: null, svg: null, name, processing: true };
+  // Clear any previous stamp job for this index since the SVG will change
+  delete stampJobs[idx];
+  updateGallery();
+
+  try {
+    const res = await fetch('/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_id: imageId,
+        x: sel.x, y: sel.y, w: sel.w, h: sel.h,
+        shape: sel.shape,
+        name,
+        fill_holes: true,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      results[idx] = { id: null, svg: null, name, error: data.error, processing: false };
+    } else {
+      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
+    }
+  } catch (err) {
+    results[idx] = { id: null, svg: null, name, error: err.message, processing: false };
+  }
+  currentIdx = idx;
+  updateGallery();
+}
+
+// ── Generate .3mf (non-blocking) ──
+// Track active stamp jobs per result index
+const stampJobs = {}; // resultIdx -> {jobId, status}
+
+async function generateStamp() {
+  const idx = currentIdx;
+  const r = results[idx];
+  if (!r || !r.id) return;
+
+  // Don't start another if already running for this extraction
+  if (stampJobs[idx] && stampJobs[idx].status === 'running') return;
+
+  try {
+    const res = await fetch('/stamp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extraction_id: r.id, name: r.name }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('Stamp generation failed: ' + data.error);
+      return;
+    }
+    stampJobs[idx] = { jobId: data.job_id, status: 'running' };
+    updateStampButton();
+    pollStampJob(idx, data.job_id);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function pollStampJob(idx, jobId) {
+  const maxPolls = 200; // 200 * 2s = ~6.5 min max
+  let failures = 0;
+  for (let i = 0; i < maxPolls; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const res = await fetch(`/stamp/status/${jobId}`);
+      if (!res.ok) { failures++; if (failures > 5) break; continue; }
+      failures = 0;
+      const data = await res.json();
+      if (data.status === 'done') {
+        stampJobs[idx] = { jobId, status: 'done' };
+        updateStampButton();
+        const a = document.createElement('a');
+        a.href = `/stamp/download/${jobId}`;
+        a.download = (data.name || results[idx].name) + '.3mf';
+        a.click();
+        return;
+      }
+      if (data.status === 'error') {
+        stampJobs[idx] = { jobId, status: 'error', error: data.error };
+        updateStampButton();
+        alert('Stamp failed: ' + (data.error || 'Unknown error'));
+        return;
+      }
+    } catch (err) {
+      failures++;
+      if (failures > 5) break;
+    }
+  }
+  // Timed out or too many failures
+  stampJobs[idx] = { jobId, status: 'error', error: 'Timed out or lost connection' };
+  updateStampButton();
+}
+
+function updateStampButton() {
+  const btn = document.getElementById('btn-3mf');
+  const job = stampJobs[currentIdx];
+  if (job && job.status === 'running') {
+    btn.innerHTML = '<span class="stamp-spinner"></span>Generating...';
+    btn.disabled = true;
+  } else if (job && job.status === 'done') {
+    btn.innerHTML = 'Download .3mf';
+    btn.disabled = false;
+    btn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = `/stamp/download/${job.jobId}`;
+      a.download = results[currentIdx].name + '.3mf';
+      a.click();
+    };
+  } else {
+    btn.innerHTML = 'Generate .3mf';
+    btn.disabled = false;
+    btn.onclick = generateStamp;
+  }
+}
+
+// ── Eraser ──
+let eraserOpen = false, eraserCtx = null, eraserImg = null;
+let erasing = false, brushRadius = 15;
+let eraserExtId = null, eraserResultIdx = -1;
+
+function openEraser() {
+  const r = results[currentIdx];
+  if (!r || !r.id) return;
+  eraserExtId = r.id;
+  eraserResultIdx = currentIdx;
+
+  const overlay = document.getElementById('eraser-overlay');
+  const eCanvas = document.getElementById('eraser-canvas');
+  eraserCtx = eCanvas.getContext('2d');
+
+  // Load the extraction's B&W PNG
+  eraserImg = new Image();
+  eraserImg.onload = () => {
+    // Scale to fit viewport while keeping crisp
+    const maxW = window.innerWidth * 0.85;
+    const maxH = window.innerHeight * 0.65;
+    const scale = Math.min(maxW / eraserImg.width, maxH / eraserImg.height, 2);
+    eCanvas.width = Math.round(eraserImg.width * scale);
+    eCanvas.height = Math.round(eraserImg.height * scale);
+    eraserCtx.imageSmoothingEnabled = false;
+    eraserCtx.drawImage(eraserImg, 0, 0, eCanvas.width, eCanvas.height);
+    overlay.classList.add('open');
+    eraserOpen = true;
+  };
+  eraserImg.src = `/extraction/png/${r.id}`;
+
+  document.getElementById('eraser-brush-size').value = brushRadius;
+  document.getElementById('eraser-brush-label').textContent = brushRadius + 'px';
+}
+
+function closeEraser() {
+  document.getElementById('eraser-overlay').classList.remove('open');
+  eraserOpen = false;
+}
+
+async function applyEraser() {
+  const eCanvas = document.getElementById('eraser-canvas');
+  // Send the edited canvas back as PNG
+  const blob = await new Promise(r => eCanvas.toBlob(r, 'image/png'));
+  const form = new FormData();
+  form.append('extraction_id', eraserExtId);
+  form.append('image', blob, 'edited.png');
+
+  closeEraser();
+  const idx = eraserResultIdx;
+  const name = results[idx].name;
+  results[idx] = { id: null, svg: null, name, processing: true };
+  delete stampJobs[idx];
+  updateGallery();
+
+  try {
+    const res = await fetch('/retrace', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.error) {
+      results[idx] = { id: eraserExtId, svg: null, name, error: data.error, processing: false };
+    } else {
+      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
+    }
+  } catch (err) {
+    results[idx] = { id: eraserExtId, svg: null, name, error: err.message, processing: false };
+  }
+  currentIdx = idx;
+  updateGallery();
+}
+
+// Eraser canvas mouse events
+(function() {
+  const eCanvas = document.getElementById('eraser-canvas');
+
+  function eraseAt(e) {
+    if (!eraserCtx) return;
+    const rect = eCanvas.getBoundingClientRect();
+    const scaleX = eCanvas.width / rect.width;
+    const scaleY = eCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    const r = brushRadius * Math.max(scaleX, scaleY);
+    eraserCtx.fillStyle = '#ffffff';
+    eraserCtx.beginPath();
+    eraserCtx.arc(x, y, r, 0, Math.PI * 2);
+    eraserCtx.fill();
+  }
+
+  eCanvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    erasing = true;
+    eraseAt(e);
+  });
+  eCanvas.addEventListener('mousemove', (e) => {
+    // Draw cursor circle
+    if (eraserOpen) {
+      const rect = eCanvas.getBoundingClientRect();
+      const overlay = document.getElementById('eraser-cursor');
+      const d = brushRadius * 2;
+      overlay.style.width = d + 'px';
+      overlay.style.height = d + 'px';
+      overlay.style.left = (e.clientX - brushRadius) + 'px';
+      overlay.style.top = (e.clientY - brushRadius) + 'px';
+      overlay.style.display = 'block';
+    }
+    if (erasing) eraseAt(e);
+  });
+  eCanvas.addEventListener('mouseup', () => { erasing = false; });
+  eCanvas.addEventListener('mouseleave', () => {
+    erasing = false;
+    document.getElementById('eraser-cursor').style.display = 'none';
+  });
+})();
+
+document.getElementById('eraser-brush-size').addEventListener('input', (e) => {
+  brushRadius = parseInt(e.target.value);
+  document.getElementById('eraser-brush-label').textContent = brushRadius + 'px';
+});
+
+// Close on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && eraserOpen) closeEraser();
+});
+
+// ── Resize handling ──
+window.addEventListener('resize', () => { if (img) draw(); });
+</script>
+
+</body>
+</html>

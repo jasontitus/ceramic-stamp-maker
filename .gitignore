@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+__pycache__/
+
+# Large image/binary files
+*.jpg
+*.jpeg
+*.JPG
+*.PNG
+*.png
+*.eps
+*.pbm
+*.bmp
+*.stl
+*.3mf
+
+# Temp / extracted artifacts
+processor/extracted/
+processor/new/
+
+# OS
+.DS_Store

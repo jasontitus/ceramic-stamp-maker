@@ -17,7 +17,7 @@ set -euo pipefail
 DESIGN_DEPTH=2.8       # mm - raised feature height (2.5-3.0 recommended)
 BASE_THICKNESS=6       # mm - solid plate behind design (prevents flex)
 BASE_OFFSET=1.5        # mm - structural margin around design outline
-HANDLE_HEIGHT=20       # mm - handle length
+HANDLE_HEIGHT=45       # mm - handle length (~1.75in, comfortable grip)
 HANDLE_D=12            # mm - handle shaft diameter
 BEVEL=0.2              # mm - edge chamfer for clean clay release
 # =============================================================

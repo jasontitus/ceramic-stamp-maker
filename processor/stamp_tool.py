@@ -272,10 +272,14 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_extract(self):
         try:
-            data = json.loads(self._read_body())
-        except json.JSONDecodeError:
-            self._send_error(400, "Invalid JSON")
-            return
+            self._do_extract()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._send_error(500, f"Extract failed: {e}")
+
+    def _do_extract(self):
+        data = json.loads(self._read_body())
 
         image_id = data.get("image_id")
         rec = images.get(image_id)
@@ -291,6 +295,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
 
         gray = rec["img"]
         img_h, img_w = gray.shape
+        print(f"  Extract request: x={x} y={y} w={w} h={h} img={img_w}x{img_h}")
 
         # Clamp to image bounds
         x = max(0, min(x, img_w - 1))
@@ -299,7 +304,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         h = min(h, img_h - y)
 
         if w < 2 or h < 2:
-            self._send_error(400, "Selection too small")
+            self._send_error(400, f"Selection too small after clamp: w={w} h={h}")
             return
 
         # For vector sources, re-render the selected region at high DPI
@@ -330,8 +335,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         # 4. Gaussian blur
         crop = cv2.GaussianBlur(crop, (5, 5), 0)
 
-        # 5. Threshold
-        _, bw = cv2.threshold(crop, 140, 255, cv2.THRESH_BINARY)
+        # 5. Threshold (Otsu auto-detects the best level for any contrast)
+        _, bw = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         # 6. Tight-crop whitespace
         inv = 255 - bw
@@ -363,17 +368,24 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         # 8. Final threshold
         _, bw = cv2.threshold(bw, 128, 255, cv2.THRESH_BINARY)
 
-        # 8b. Fill holes — fill interior gaps in each shape
+        # 8b. Fill holes — fill small interior gaps (dots, thin lines)
+        #     Skip large white regions that are intentional parts of the design
         fill_holes = data.get("fill_holes", False)
         if fill_holes:
-            # Invert so shapes are white on black
-            inv_bw = cv2.bitwise_not(bw)
-            # Find external contours only
-            contours, _ = cv2.findContours(inv_bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            # Draw them filled onto a clean canvas → solid shapes, no holes
-            filled = np.ones_like(bw) * 255  # white background
-            cv2.drawContours(filled, contours, -1, 0, cv2.FILLED)  # black fill
-            bw = filled
+            total_area = bw.shape[0] * bw.shape[1]
+            max_fill = total_area * 0.05  # only fill holes smaller than 5% of image
+            # Find all white regions using contours on the inverted image
+            # RETR_CCOMP gives 2-level hierarchy: outer contours + holes
+            contours, hierarchy = cv2.findContours(
+                bw, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+            if hierarchy is not None:
+                for i, cnt in enumerate(contours):
+                    # hierarchy[0][i][3] >= 0 means this contour has a parent
+                    # i.e. it's a hole inside a shape (white inside black)
+                    if hierarchy[0][i][3] >= 0:
+                        area = cv2.contourArea(cnt)
+                        if area < max_fill:
+                            cv2.drawContours(bw, [cnt], -1, 0, cv2.FILLED)
 
         # 9. Write temp BMP, run potrace
         ext_id = str(uuid.uuid4())[:8]

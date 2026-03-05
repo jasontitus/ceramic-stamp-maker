@@ -202,147 +202,69 @@ module design_2d() {
         import("${SVG_FILE}", center = true);
 }
 
-// === HANDLE (bottom, sits on build plate) ===
+// Small overlap at joints to ensure manifold mesh
+e = 0.01;
 
-// Palm-press pad (wider base for stability)
-cylinder(h = palm_h, d1 = handle_d + 4, d2 = handle_d);
+union() {
+    // === HANDLE (bottom, sits on build plate) ===
 
-// Shaft
-translate([0, 0, palm_h])
-    cylinder(h = shaft_h, d = handle_d);
+    // Palm-press pad (wider base for stability)
+    cylinder(h = palm_h + e, d1 = handle_d + 4, d2 = handle_d);
 
-// Cone transition toward base
-translate([0, 0, palm_h + shaft_h])
-    cylinder(h = transition_h, d1 = handle_d, d2 = cone_top_d);
+    // Shaft
+    translate([0, 0, palm_h])
+        cylinder(h = shaft_h + e, d = handle_d);
 
-// === BASE PLATE (exact design outline) ===
-translate([0, 0, z_base])
-    linear_extrude(height = base_thick)
-        design_2d();
+    // Cone transition toward base
+    translate([0, 0, palm_h + shaft_h])
+        cylinder(h = transition_h + e, d1 = handle_d, d2 = cone_top_d);
 
-// === DESIGN FEATURES (top, stamp face UP) ===
-translate([0, 0, z_design]) {
-    // Main body
-    linear_extrude(height = design_depth - bevel, convexity = 10)
-        design_2d();
+    // === BASE PLATE (exact design outline) ===
+    translate([0, 0, z_base])
+        linear_extrude(height = base_thick + e)
+            design_2d();
 
-    // Beveled top edge: slightly inset for clean clay release
-    translate([0, 0, design_depth - bevel])
-        linear_extrude(height = bevel, convexity = 10)
-        offset(delta = -bevel)
-        design_2d();
+    // === DESIGN FEATURES (top, stamp face UP) ===
+    translate([0, 0, z_design]) {
+        // Main body
+        linear_extrude(height = design_depth - bevel + e, convexity = 10)
+            design_2d();
+
+        // Beveled top edge: slightly inset for clean clay release
+        translate([0, 0, design_depth - bevel])
+            linear_extrude(height = bevel, convexity = 10)
+            offset(delta = -bevel)
+            design_2d();
+    }
 }
 OPENSCAD
 
 echo "  Saved: $OUTPUT_SCAD"
 
-# ── Step 4: Render STL ──
-echo "[4/5] Rendering STL (this may take a moment)..."
+# ── Step 4: Render 3MF directly from OpenSCAD ──
+echo "[4/5] Rendering 3MF (this may take a moment)..."
+
+# Export .3mf directly from OpenSCAD (Manifold backend produces clean mesh)
+"$OPENSCAD" -o "$OUTPUT_3MF" "$OUTPUT_SCAD" 2>&1 | grep -v "^$" || true
+
+# Also export STL for other slicers
 "$OPENSCAD" -o "$OUTPUT_STL" "$OUTPUT_SCAD" 2>&1 | grep -v "^$" || true
 
-if [[ ! -f "$OUTPUT_STL" || ! -s "$OUTPUT_STL" ]]; then
-    echo "Error: STL rendering failed."
+if [[ ! -f "$OUTPUT_3MF" || ! -s "$OUTPUT_3MF" ]]; then
+    echo "Error: 3MF rendering failed."
     echo "Debug by opening $OUTPUT_SCAD in OpenSCAD."
     exit 1
 fi
 
-# ── Step 5: Package as Bambu Studio .3mf project ──
-echo "[5/5] Packaging Bambu Studio project (.3mf)..."
+# ── Step 5: Inject Bambu Studio settings into the .3mf ──
+echo "[5/5] Adding Bambu Studio print settings..."
 
-python3 - "$OUTPUT_STL" "$OUTPUT_3MF" << 'PY3MF'
-import sys, struct, zipfile
+python3 - "$OUTPUT_3MF" << 'PY3MF'
+import sys, zipfile, os, tempfile, shutil
 
-stl_path = sys.argv[1]
-out_3mf  = sys.argv[2]
+tmf_path = sys.argv[1]
 
-# ── Parse STL (auto-detect ASCII vs binary) ──
-vert_map = {}
-verts = []
-tris = []
-
-def add_vertex(x, y, z):
-    key = (round(x, 6), round(y, 6), round(z, 6))
-    if key not in vert_map:
-        vert_map[key] = len(verts)
-        verts.append(key)
-    return vert_map[key]
-
-with open(stl_path, 'rb') as f:
-    head = f.read(80)
-    is_ascii = head.strip().startswith(b'solid') and b'\x00' not in head
-
-if is_ascii:
-    with open(stl_path, 'r') as f:
-        tri_verts = []
-        for line in f:
-            line = line.strip()
-            if line.startswith('vertex'):
-                parts = line.split()
-                idx = add_vertex(float(parts[1]), float(parts[2]), float(parts[3]))
-                tri_verts.append(idx)
-                if len(tri_verts) == 3:
-                    tris.append(tuple(tri_verts))
-                    tri_verts = []
-else:
-    with open(stl_path, 'rb') as f:
-        f.read(80)
-        n_tri = struct.unpack('<I', f.read(4))[0]
-        for _ in range(n_tri):
-            f.read(12)  # skip normal
-            tri_idx = []
-            for _ in range(3):
-                x, y, z = struct.unpack('<3f', f.read(12))
-                tri_idx.append(add_vertex(x, y, z))
-            tris.append(tuple(tri_idx))
-            f.read(2)
-
-print(f"  Mesh: {len(verts)} vertices, {len(tris)} triangles")
-
-# ── Build 3D/3dmodel.model XML ──
-v_lines = []
-for v in verts:
-    v_lines.append(f'        <vertex x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}"/>')
-t_lines = []
-for t in tris:
-    t_lines.append(f'        <triangle v1="{t[0]}" v2="{t[1]}" v3="{t[2]}"/>')
-
-model_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US"
-  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
-  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"
-  requiredextensions="p">
-  <metadata name="BambuStudio:3mfVersion" value="1"/>
-  <resources>
-    <object id="2" type="model">
-      <mesh>
-        <vertices>
-{chr(10).join(v_lines)}
-        </vertices>
-        <triangles>
-{chr(10).join(t_lines)}
-        </triangles>
-      </mesh>
-    </object>
-  </resources>
-  <build p:UUID="e9e25302-6382-11e8-a1c0-00055d171cb2">
-    <item objectid="2" p:UUID="e9e25304-6382-11e8-a1c0-00055d171cb2"
-          transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1"/>
-  </build>
-</model>'''
-
-content_types = '''<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
-</Types>'''
-
-rels = '''<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Target="/3D/3dmodel.model" Id="rel0"
-    Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
-</Relationships>'''
-
+# Bambu Studio metadata to inject
 model_settings = '''<?xml version="1.0" encoding="UTF-8"?>
 <config>
   <object id="2">
@@ -395,15 +317,22 @@ bridge_flow = 0.95
 plate_config = """; generated by png2stamp.sh
 """
 
-with zipfile.ZipFile(out_3mf, 'w', zipfile.ZIP_DEFLATED) as zf:
-    zf.writestr('[Content_Types].xml', content_types)
-    zf.writestr('_rels/.rels', rels)
-    zf.writestr('3D/3dmodel.model', model_xml)
-    zf.writestr('Metadata/Slic3r_PE.config', process_config)
-    zf.writestr('Metadata/model_settings.config', model_settings)
-    zf.writestr('Metadata/project_settings.config', plate_config)
+# Read existing .3mf, add Bambu settings, write back
+tmp_fd, tmp_path = tempfile.mkstemp(suffix='.3mf')
+os.close(tmp_fd)
 
-print(f"  Saved: {out_3mf}")
+with zipfile.ZipFile(tmf_path, 'r') as zin, \
+     zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+    # Copy all existing entries
+    for item in zin.infolist():
+        zout.writestr(item, zin.read(item.filename))
+    # Add Bambu settings
+    zout.writestr('Metadata/Slic3r_PE.config', process_config)
+    zout.writestr('Metadata/model_settings.config', model_settings)
+    zout.writestr('Metadata/project_settings.config', plate_config)
+
+shutil.move(tmp_path, tmf_path)
+print(f"  Saved: {tmf_path}")
 PY3MF
 
 if [[ -f "$OUTPUT_3MF" && -s "$OUTPUT_3MF" ]]; then

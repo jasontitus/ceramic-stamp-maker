@@ -20,7 +20,7 @@ REF_DESIGN_DEPTH=2.8   # mm - raised feature height at reference size
 REF_BASE_THICKNESS=6   # mm - solid plate behind design
 REF_BASE_OFFSET=1.5    # mm - structural margin around design outline
 REF_BEVEL=0.2          # mm - edge chamfer for clay release
-HANDLE_HEIGHT=45       # mm - handle length (~1.75in, comfortable grip)
+HANDLE_HEIGHT=22       # mm - handle length (~0.9in)
 HANDLE_D=12            # mm - handle shaft diameter
 # =============================================================
 

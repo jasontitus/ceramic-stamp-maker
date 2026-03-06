@@ -25,11 +25,13 @@ HANDLE_D=12            # mm - handle shaft diameter
 # =============================================================
 
 usage() {
-    echo "Usage: $0 <input.png> [output_base] [size_mm]"
+    echo "Usage: $0 <input.png> [output_base] [size_mm] [thicken_mm]"
     echo ""
     echo "  input.png    Black-on-white (or transparent) PNG of your design"
     echo "  output_base  Base name for outputs (default: <input>_stamp)"
     echo "  size_mm      Design face size in mm (default: 18 for ~1.8cm)"
+    echo "  thicken_mm   Override feature thickening in mm (default: auto)"
+    echo "               Use 0.25 for thin-line sources like hatched artwork"
     echo ""
     echo "Produces:"
     echo "  *_stamp.3mf   - Bambu Studio project (open directly, settings included)"
@@ -64,8 +66,14 @@ BEVEL=$(awk "BEGIN{v=$REF_BEVEL*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<0.05?
 # Minimum feature thickening: ensures features are wide enough to print.
 # At small sizes, features scale below nozzle width (~0.42mm) and the slicer
 # drops them. This offset (applied in stamp-mm AFTER scaling) compensates.
-# 0 at 36mm+, ~0.15mm at 18mm, ~0.20mm at 12mm.
-MIN_THICKEN=$(awk "BEGIN{v=0.30*(1-$STAMP_SIZE/36); printf \"%.2f\", (v<0?0:v)}")
+# Auto: 0 at 36mm+, ~0.15mm at 18mm, ~0.20mm at 12mm.
+# Override: pass thicken_mm as 4th arg (e.g. 0.25 for thin-line sources).
+THICKEN_OVERRIDE="${4:-}"
+if [[ -n "$THICKEN_OVERRIDE" ]]; then
+    MIN_THICKEN="$THICKEN_OVERRIDE"
+else
+    MIN_THICKEN=$(awk "BEGIN{v=0.30*(1-$STAMP_SIZE/36); printf \"%.2f\", (v<0?0:v)}")
+fi
 OUTPUT_BASE="${2:-${OUT_DIR}/${BASENAME}_stamp}"
 OUTPUT_BASE="${OUTPUT_BASE%.3mf}"
 OUTPUT_BASE="${OUTPUT_BASE%.stl}"
@@ -389,6 +397,7 @@ if [[ -f "$OUTPUT_3MF" && -s "$OUTPUT_3MF" ]]; then
     echo "  Also saved:  .stl ($STL_SIZE), .scad, .svg"
     echo ""
     echo "  Design:       ${DESIGN_W} x ${DESIGN_H}mm, ${DESIGN_DEPTH}mm raised"
+    echo "  Thicken:      ${MIN_THICKEN}mm${THICKEN_OVERRIDE:+ (override)}"
     echo "  Base plate:   follows design outline + ${BASE_OFFSET}mm margin"
     echo "  Bevel:        ${BEVEL}mm edge chamfer"
     echo "  Total height: ${TOTAL_H}mm"

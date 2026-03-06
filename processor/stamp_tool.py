@@ -597,6 +597,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
 
         name = data.get("name", rec["name"])
         size_mm = data.get("size_mm", "36")
+        thin_lines = data.get("thin_lines", False)
         job_id = str(uuid.uuid4())[:8]
         stamp_jobs[job_id] = {"status": "running", "path": None, "name": name, "error": None}
 
@@ -609,6 +610,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             output_base = os.path.join(tmp_dir, name)
             try:
                 cmd = ["bash", PNG2STAMP, svg_path, output_base, str(size_mm)]
+                if thin_lines:
+                    cmd.append("0.25")
                 print(f"  [stamp] Running: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 print(f"  [stamp] stdout: {result.stdout[:500]}")

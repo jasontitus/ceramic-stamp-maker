@@ -180,11 +180,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
             <span id="size-label">36mm</span>
             <input type="range" id="stamp-size" min="12" max="80" value="36" step="1"
               style="width:80px;vertical-align:middle"
-              oninput="document.getElementById('size-label').textContent=this.value+'mm'; invalidateStamp()">
+              oninput="document.getElementById('size-label').textContent=this.value+'mm'; invalidateStamp(); updateGallery()">
           </label>
           <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc;cursor:pointer"
             title="Thicken thin features so they survive the slicer. Use for sources with fine lines, hatching, or delicate detail.">
-            <input type="checkbox" id="thin-lines" onchange="invalidateStamp()">
+            <input type="checkbox" id="thin-lines" onchange="invalidateStamp(); updateGallery()">
             Thin lines
           </label>
           <button class="primary" id="btn-3mf" onclick="generateStamp()">Generate .3mf</button>
@@ -584,6 +584,30 @@ async function reExtract(selIdx) {
   updateGallery();
 }
 
+// ── Thin-lines preview: add stroke to SVG paths to visualize thickening ──
+function applyThinLinesPreview(svgEl) {
+  const thinLines = document.getElementById('thin-lines').checked;
+  const paths = svgEl.querySelectorAll('path');
+  if (!thinLines) {
+    paths.forEach(p => { p.removeAttribute('stroke'); p.removeAttribute('stroke-width'); p.removeAttribute('stroke-linejoin'); });
+    return;
+  }
+  // Read native SVG width (potrace outputs in pt, viewBox matches)
+  const rawW = parseFloat(svgEl.getAttribute('width')) || 800;
+  const stampSize = parseFloat(document.getElementById('stamp-size').value) || 36;
+  const thickenMm = 0.25;
+  // Convert thicken from stamp-mm to SVG coordinate units.
+  // In SCAD: offset(delta) applied after scale(design/svg), so in SVG coords:
+  //   delta_svg = thicken * rawW / stampSize
+  // stroke-width extends W/2 outward, offset extends delta outward, so W = 2*delta
+  const strokeW = 2 * thickenMm * rawW / stampSize;
+  paths.forEach(p => {
+    p.setAttribute('stroke', 'black');
+    p.setAttribute('stroke-width', strokeW);
+    p.setAttribute('stroke-linejoin', 'round');
+  });
+}
+
 // ── Gallery ──
 function updateGallery() {
   const countEl = document.getElementById('gallery-count');
@@ -617,9 +641,9 @@ function updateGallery() {
     info.textContent = r.error;
   } else if (r.svg) {
     display.innerHTML = r.svg;
-    // Scale SVG to fit
     const svgEl = display.querySelector('svg');
     if (svgEl) {
+      applyThinLinesPreview(svgEl);  // before removing width (needs native size)
       svgEl.removeAttribute('width');
       svgEl.removeAttribute('height');
       svgEl.style.maxWidth = '130px';
@@ -641,6 +665,7 @@ function updateGallery() {
       t.innerHTML = r.svg;
       const svgEl = t.querySelector('svg');
       if (svgEl) {
+        applyThinLinesPreview(svgEl);
         svgEl.removeAttribute('width');
         svgEl.removeAttribute('height');
         svgEl.style.maxWidth = '40px';

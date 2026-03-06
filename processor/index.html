@@ -150,9 +150,10 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 <div class="toolbar">
   <h1>Stamp Extractor</h1>
   <label for="file-input" id="file-label">Choose File</label>
-  <input type="file" id="file-input" accept="image/*,.eps,.ps,.ai">
+  <input type="file" id="file-input" accept="image/*,.eps,.ps,.ai,.svg">
   <button id="btn-rect" class="active" onclick="setTool('rect')">Rectangle</button>
   <button id="btn-circle" onclick="setTool('circle')">Circle</button>
+  <button id="btn-selectall" onclick="selectAll()">Select All</button>
   <div class="spacer"></div>
   <span class="hint" id="status-hint">Load an image to begin</span>
 </div>
@@ -236,6 +237,15 @@ function setTool(t) {
   tool = t;
   document.getElementById('btn-rect').classList.toggle('active', t === 'rect');
   document.getElementById('btn-circle').classList.toggle('active', t === 'circle');
+}
+
+function selectAll() {
+  if (!img) return;
+  const color = colors[selections.length % colors.length];
+  const sel = { x: 0, y: 0, w: imgW, h: imgH, shape: 'rect', color };
+  selections.push(sel);
+  draw();
+  extractRegion(sel, selections.length);
 }
 
 // ── Hit-test: find selection under cursor (topmost = last drawn) ──
@@ -856,7 +866,7 @@ function openEraser() {
     overlay.classList.add('open');
     eraserOpen = true;
   };
-  eraserImg.src = `/extraction/png/${r.id}`;
+  eraserImg.src = `/extraction/png/${r.id}?t=${Date.now()}`;
 
   document.getElementById('eraser-brush-size').value = brushRadius;
   document.getElementById('eraser-brush-label').textContent = brushRadius + 'px';

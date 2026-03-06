@@ -175,13 +175,30 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         image_id = str(uuid.uuid4())[:8]
         ext = os.path.splitext(filename)[1].lower() if filename else ""
         is_eps = ext in (".eps", ".ps", ".ai")
+        is_svg = ext in (".svg",)
 
         # Save to temp file with correct extension
         tmp = tempfile.NamedTemporaryFile(suffix=ext or ".jpg", delete=False)
         tmp.write(file_data)
         tmp.close()
 
-        if is_eps:
+        if is_svg:
+            # Rasterize SVG via rsvg-convert at high DPI for canvas preview
+            try:
+                png_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                png_tmp.close()
+                subprocess.run(
+                    ["rsvg-convert", "-d", "300", "-p", "300", "-o", png_tmp.name, tmp.name],
+                    check=True, capture_output=True
+                )
+                tmp_path = png_tmp.name
+                print(f"  Converted SVG to PNG via rsvg-convert")
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                os.unlink(tmp.name)
+                self._send_error(400, f"Could not convert SVG: {e}")
+                return
+
+        elif is_eps:
             # Convert EPS/PS/AI to PNG via Pillow+Ghostscript
             # Keep original vector for high-res re-rendering during extraction
             try:

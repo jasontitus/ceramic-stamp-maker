@@ -14,12 +14,14 @@
 set -euo pipefail
 
 # ===================== STAMP PARAMETERS =====================
-DESIGN_DEPTH=2.8       # mm - raised feature height (2.5-3.0 recommended)
-BASE_THICKNESS=6       # mm - solid plate behind design (prevents flex)
-BASE_OFFSET=1.5        # mm - structural margin around design outline
+# These are reference values for a 36mm stamp; they scale for other sizes
+REF_SIZE=36            # mm - reference stamp size for parameter scaling
+REF_DESIGN_DEPTH=2.8   # mm - raised feature height at reference size
+REF_BASE_THICKNESS=6   # mm - solid plate behind design
+REF_BASE_OFFSET=1.5    # mm - structural margin around design outline
+REF_BEVEL=0.2          # mm - edge chamfer for clay release
 HANDLE_HEIGHT=45       # mm - handle length (~1.75in, comfortable grip)
 HANDLE_D=12            # mm - handle shaft diameter
-BEVEL=0.2              # mm - edge chamfer for clean clay release
 # =============================================================
 
 usage() {
@@ -39,14 +41,31 @@ usage() {
 
 # ── Parse arguments ──
 [[ $# -lt 1 ]] && usage
-INPUT_PNG="$1"
-[[ ! -f "$INPUT_PNG" ]] && echo "Error: File not found: $INPUT_PNG" && exit 1
+INPUT_FILE="$1"
+[[ ! -f "$INPUT_FILE" ]] && echo "Error: File not found: $INPUT_FILE" && exit 1
 
-INPUT_PNG="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-BASENAME="$(basename "$INPUT_PNG" .png)"
-OUT_DIR="$(dirname "$INPUT_PNG")"
+INPUT_FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+INPUT_EXT="${INPUT_FILE##*.}"
+BASENAME="$(basename "$INPUT_FILE" ".$INPUT_EXT")"
+OUT_DIR="$(dirname "$INPUT_FILE")"
 STAMP_SIZE="${3:-18}"
+# When input is SVG, skip bitmap conversion and potrace (use SVG directly)
+SVG_INPUT=false
+if [[ "$INPUT_EXT" == "svg" || "$INPUT_EXT" == "SVG" ]]; then
+    SVG_INPUT=true
+fi
 
+# Scale parameters proportionally to stamp size (reference: 36mm)
+# awk ensures proper decimal formatting (no leading-dot issues from bc)
+DESIGN_DEPTH=$(awk "BEGIN{v=$REF_DESIGN_DEPTH*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<1.2?1.2:v)}")
+BASE_THICKNESS=$(awk "BEGIN{v=$REF_BASE_THICKNESS*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<3?3:v)}")
+BASE_OFFSET=$(awk "BEGIN{v=$REF_BASE_OFFSET*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<0.8?0.8:v)}")
+BEVEL=$(awk "BEGIN{v=$REF_BEVEL*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<0.05?0.05:v)}")
+# Minimum feature thickening: ensures features are wide enough to print.
+# At small sizes, features scale below nozzle width (~0.42mm) and the slicer
+# drops them. This offset (applied in stamp-mm AFTER scaling) compensates.
+# 0 at 36mm+, ~0.15mm at 18mm, ~0.20mm at 12mm.
+MIN_THICKEN=$(awk "BEGIN{v=0.30*(1-$STAMP_SIZE/36); printf \"%.2f\", (v<0?0:v)}")
 OUTPUT_BASE="${2:-${OUT_DIR}/${BASENAME}_stamp}"
 OUTPUT_BASE="${OUTPUT_BASE%.3mf}"
 OUTPUT_BASE="${OUTPUT_BASE%.stl}"
@@ -82,14 +101,20 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 echo "=== Ceramic Debossing Stamp Generator ==="
-echo "  Input:  $INPUT_PNG"
+echo "  Input:  $INPUT_FILE"
 echo "  Output: $OUTPUT_3MF"
 echo "  Face:   ${STAMP_SIZE}mm (~$(echo "scale=1; $STAMP_SIZE/10" | bc)cm)"
 echo ""
 
-# ── Step 1: Flatten alpha, convert to monochrome PBM ──
-echo "[1/5] Preparing image..."
-python3 - "$INPUT_PNG" "$WORK/input.pbm" << 'PYEOF'
+if $SVG_INPUT; then
+    # ── SVG input: skip bitmap conversion, use directly ──
+    echo "[1/5] Using SVG directly (skipping bitmap conversion)..."
+    cp "$INPUT_FILE" "$OUTPUT_SVG"
+    echo "[2/5] Reading SVG dimensions..."
+else
+    # ── Step 1: Flatten alpha, convert to monochrome PBM ──
+    echo "[1/5] Preparing image..."
+    python3 - "$INPUT_FILE" "$WORK/input.pbm" << 'PYEOF'
 import sys
 from PIL import Image
 
@@ -123,34 +148,45 @@ img.save(sys.argv[2])
 print(f"  Saved monochrome PBM")
 PYEOF
 
-# ── Step 2: Trace to SVG with potrace, then set exact mm size ──
-echo "[2/5] Tracing design with potrace..."
-# 1) Trace at natural size (no -W/-H — avoids potrace stretching)
-potrace "$WORK/input.pbm" \
-    --svg \
-    --tight \
-    -o "$OUTPUT_SVG"
+    # ── Step 2: Trace to SVG with potrace ──
+    echo "[2/5] Tracing design with potrace..."
+    potrace "$WORK/input.pbm" \
+        --svg \
+        --tight \
+        -o "$OUTPUT_SVG"
+fi
 
-# 2) Rewrite SVG width/height to target mm, preserving aspect ratio.
-#    The viewBox (path coordinates) stays untouched — zero distortion.
+# Read native SVG size, compute design dimensions.
+# Keep SVG at its native size so OpenSCAD imports at high resolution.
+# SCAD scales to actual stamp size — preserves thin connections.
 DIMS=$(python3 - "$OUTPUT_SVG" "$STAMP_SIZE" << 'PYSVG'
 import re, sys
 svg = open(sys.argv[1]).read()
 stamp = float(sys.argv[2])
-vb = re.search(r'viewBox="([^"]+)"', svg).group(1).split()
-w, h = float(vb[2]), float(vb[3])
-if w >= h:
-    mw, mh = stamp, stamp * h / w
+# Read native SVG dimensions (may be pt or mm)
+wm = re.search(r'width="([\d.]+)\s*(pt|mm|)', svg)
+hm = re.search(r'height="([\d.]+)\s*(pt|mm|)', svg)
+raw_w, raw_h = float(wm.group(1)), float(hm.group(1))
+unit = wm.group(2) if wm.group(2) else 'pt'
+# Convert to mm for OpenSCAD
+if unit == 'pt':
+    svg_w_mm = raw_w * 0.3528
+    svg_h_mm = raw_h * 0.3528
+else:  # already mm
+    svg_w_mm = raw_w
+    svg_h_mm = raw_h
+# Compute actual stamp dimensions preserving aspect ratio
+if svg_w_mm >= svg_h_mm:
+    mw, mh = stamp, stamp * svg_h_mm / svg_w_mm
 else:
-    mw, mh = stamp * w / h, stamp
-svg = re.sub(r'width="[^"]+"', f'width="{mw}mm"', svg, count=1)
-svg = re.sub(r'height="[^"]+"', f'height="{mh}mm"', svg, count=1)
-open(sys.argv[1], 'w').write(svg)
-print(f"{mw:.4f} {mh:.4f}")
+    mw, mh = stamp * svg_w_mm / svg_h_mm, stamp
+print(f"{mw:.4f} {mh:.4f} {svg_w_mm:.4f} {svg_h_mm:.4f}")
 PYSVG
 )
 DESIGN_W=$(echo "$DIMS" | cut -d' ' -f1)
 DESIGN_H=$(echo "$DIMS" | cut -d' ' -f2)
+SVG_W=$(echo "$DIMS" | cut -d' ' -f3)
+SVG_H=$(echo "$DIMS" | cut -d' ' -f4)
 echo "  Design: ${DESIGN_W} x ${DESIGN_H} mm (native proportions, no resize)"
 echo "  Saved: $OUTPUT_SVG"
 
@@ -194,10 +230,16 @@ z_design       = z_base + base_thick;
 
 \$fn = 80;
 
-// --- 2D design shape (imported at exact mm size from potrace, no resize) ---
-// Mirrored so the imprint in clay reads correctly.
-// Remove mirror() if your design is symmetric or pre-mirrored.
+// --- 2D design shape ---
+// SVG is imported at native size for precision, then scaled to stamp dimensions.
+// A small offset (in stamp-mm) ensures features stay above nozzle width.
+svg_w = ${SVG_W};
+svg_h = ${SVG_H};
+min_thicken = ${MIN_THICKEN};  // mm - printability offset (0 at 36mm+)
+
 module design_2d() {
+    offset(delta = min_thicken)   // thicken in stamp-mm for printability
+    scale([design_w / svg_w, design_h / svg_h])
     mirror([1, 0, 0])
         import("${SVG_FILE}", center = true);
 }

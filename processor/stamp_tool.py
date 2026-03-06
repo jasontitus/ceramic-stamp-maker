@@ -114,7 +114,9 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_error(404)
 
-    def _serve_extraction_svg(self, ext_id):
+    def _serve_extraction_svg(self, ext_id_and_query):
+        from urllib.parse import parse_qs
+        ext_id = ext_id_and_query.split("?")[0]
         rec = extractions.get(ext_id)
         if not rec:
             self.send_error(404)
@@ -123,6 +125,12 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "image/svg+xml")
         self.send_header("Content-Length", len(svg))
+        # If dl param present, force download
+        query = urlparse(self.path).query
+        params = parse_qs(query)
+        if "dl" in params:
+            fname = params["dl"][0]
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
         self.end_headers()
         self.wfile.write(svg)
 
@@ -374,14 +382,15 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         if fill_holes:
             total_area = bw.shape[0] * bw.shape[1]
             max_fill = total_area * 0.05  # only fill holes smaller than 5% of image
-            # Find all white regions using contours on the inverted image
-            # RETR_CCOMP gives 2-level hierarchy: outer contours + holes
+            # Find contours on INVERTED image so black design shapes become white.
+            # RETR_CCOMP gives 2-level hierarchy: design shapes (level 0) and
+            # their internal holes (level 1). Level-1 contours with parent >= 0
+            # are white holes inside black shapes — exactly what we want to fill.
+            inv = cv2.bitwise_not(bw)
             contours, hierarchy = cv2.findContours(
-                bw, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+                inv, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
             if hierarchy is not None:
                 for i, cnt in enumerate(contours):
-                    # hierarchy[0][i][3] >= 0 means this contour has a parent
-                    # i.e. it's a hole inside a shape (white inside black)
                     if hierarchy[0][i][3] >= 0:
                         area = cv2.contourArea(cnt)
                         if area < max_fill:
@@ -578,10 +587,13 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._send_error(500, f"png2stamp.sh not found at {PNG2STAMP}")
             return
 
-        png_path = rec["png_path"]
-        if not os.path.isfile(png_path):
-            self._send_error(500, "Extraction PNG file missing")
+        # Write extraction SVG to a temp file for png2stamp.sh
+        # Using SVG directly preserves connection quality from the extraction
+        svg_content = rec.get("svg", "")
+        if not svg_content:
+            self._send_error(500, "Extraction SVG missing")
             return
+        print(f"  [stamp] Using SVG directly ({len(svg_content)} chars)")
 
         name = data.get("name", rec["name"])
         size_mm = data.get("size_mm", "36")
@@ -591,12 +603,17 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         # Run in background thread
         def run_stamp():
             tmp_dir = tempfile.mkdtemp()
+            svg_path = os.path.join(tmp_dir, "input.svg")
+            with open(svg_path, "w") as f:
+                f.write(svg_content)
             output_base = os.path.join(tmp_dir, name)
             try:
-                result = subprocess.run(
-                    ["bash", PNG2STAMP, png_path, output_base, str(size_mm)],
-                    capture_output=True, text=True, timeout=300
-                )
+                cmd = ["bash", PNG2STAMP, svg_path, output_base, str(size_mm)]
+                print(f"  [stamp] Running: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                print(f"  [stamp] stdout: {result.stdout[:500]}")
+                if result.stderr:
+                    print(f"  [stamp] stderr: {result.stderr[:500]}")
                 if result.returncode != 0:
                     stamp_jobs[job_id]["status"] = "error"
                     stamp_jobs[job_id]["error"] = f"png2stamp.sh failed:\n{result.stderr}"

@@ -176,6 +176,12 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
           <button onclick="invertExtraction()">Invert</button>
           <button onclick="fillHoles()">Fill Holes</button>
           <button onclick="downloadSvg()">Download SVG</button>
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc">
+            <span id="size-label">36mm</span>
+            <input type="range" id="stamp-size" min="12" max="80" value="36" step="1"
+              style="width:80px;vertical-align:middle"
+              oninput="document.getElementById('size-label').textContent=this.value+'mm'; invalidateStamp()">
+          </label>
           <button class="primary" id="btn-3mf" onclick="generateStamp()">Generate .3mf</button>
         </div>
         <div class="info" id="preview-info"></div>
@@ -653,17 +659,16 @@ function navGallery(dir) {
   }
 }
 
+// ── Download helper ──
+function triggerDownload(url, filename) {
+  window.location.href = url;
+}
+
 // ── Download SVG ──
 function downloadSvg() {
   const r = results[currentIdx];
-  if (!r || !r.svg) return;
-  const blob = new Blob([r.svg], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = r.name + '.svg';
-  a.click();
-  URL.revokeObjectURL(url);
+  if (!r || !r.id) return;
+  triggerDownload(`/extraction/svg/${r.id}?dl=${encodeURIComponent(r.name + '.svg')}`, r.name + '.svg');
 }
 
 // ── Invert B&W ──
@@ -748,7 +753,7 @@ async function generateStamp() {
     const res = await fetch('/stamp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ extraction_id: r.id, name: r.name }),
+      body: JSON.stringify({ extraction_id: r.id, name: r.name, size_mm: document.getElementById('stamp-size').value }),
     });
     const data = await res.json();
     if (data.error) {
@@ -776,10 +781,7 @@ async function pollStampJob(idx, jobId) {
       if (data.status === 'done') {
         stampJobs[idx] = { jobId, status: 'done' };
         updateStampButton();
-        const a = document.createElement('a');
-        a.href = `/stamp/download/${jobId}`;
-        a.download = (data.name || results[idx].name) + '.3mf';
-        a.click();
+        triggerDownload(`/stamp/download/${jobId}`, (data.name || results[idx].name) + '.3mf');
         return;
       }
       if (data.status === 'error') {
@@ -798,6 +800,14 @@ async function pollStampJob(idx, jobId) {
   updateStampButton();
 }
 
+function invalidateStamp() {
+  // Size changed — clear cached stamp job so next click regenerates
+  if (stampJobs[currentIdx] && stampJobs[currentIdx].status === 'done') {
+    delete stampJobs[currentIdx];
+    updateStampButton();
+  }
+}
+
 function updateStampButton() {
   const btn = document.getElementById('btn-3mf');
   const job = stampJobs[currentIdx];
@@ -808,10 +818,7 @@ function updateStampButton() {
     btn.innerHTML = 'Download .3mf';
     btn.disabled = false;
     btn.onclick = () => {
-      const a = document.createElement('a');
-      a.href = `/stamp/download/${job.jobId}`;
-      a.download = results[currentIdx].name + '.3mf';
-      a.click();
+      triggerDownload(`/stamp/download/${job.jobId}`, results[currentIdx].name + '.3mf');
     };
   } else {
     btn.innerHTML = 'Generate .3mf';

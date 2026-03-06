@@ -413,6 +413,16 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
                         if area < max_fill:
                             cv2.drawContours(bw, [cnt], -1, 0, cv2.FILLED)
 
+        # 8c. Remove tiny speck noise — connected components smaller than 0.02%
+        #     of image area. Invisible in SVG but become bumps in 3D.
+        total_px = bw.shape[0] * bw.shape[1]
+        min_speck = max(20, int(total_px * 0.0002))
+        inv_bw = cv2.bitwise_not(bw)
+        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(inv_bw, connectivity=8)
+        for lbl in range(1, n_labels):
+            if stats[lbl, cv2.CC_STAT_AREA] < min_speck:
+                bw[labels == lbl] = 255  # erase speck (set to white)
+
         # 9. Write temp BMP, run potrace
         ext_id = str(uuid.uuid4())[:8]
         tmp_dir = tempfile.mkdtemp()

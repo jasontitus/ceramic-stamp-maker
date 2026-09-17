@@ -6,6 +6,7 @@ import json
 import os
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -20,11 +21,35 @@ DEFAULT_PORT = 8800
 
 # In-memory storage
 images = {}       # id -> {"path": str, "img": np.array (grayscale)}
-extractions = {}  # id -> {"png_path": str, "svg": str, "name": str}
+extractions = {}  # id -> PNG/SVG, name, immutable baseline bitmap/SVG, and fuzz
 stamp_jobs = {}   # job_id -> {"status": "running"|"done"|"error", "path": str, "name": str, "error": str}
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PNG2STAMP = os.path.join(SCRIPT_DIR, "..", "png2stamp.sh")
+
+
+def simplify_bitmap(bw, fuzz):
+    """Remove details at an image-relative scale without accumulating edits."""
+    if fuzz == 0:
+        return bw
+    strength = fuzz / 100
+    radius = max(1, round(max(bw.shape) * 0.012 * strength ** 1.4))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                       (2 * radius + 1, 2 * radius + 1))
+    ink = cv2.bitwise_not(bw)
+    ink = cv2.morphologyEx(ink, cv2.MORPH_OPEN, kernel,
+                          borderType=cv2.BORDER_REPLICATE)
+    ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, kernel,
+                          borderType=cv2.BORDER_REPLICATE)
+    ink = cv2.GaussianBlur(ink, (2 * radius + 1, 2 * radius + 1),
+                           max(0.5, radius * 0.5), borderType=cv2.BORDER_REPLICATE)
+    _, ink = cv2.threshold(ink, 127, 255, cv2.THRESH_BINARY)
+
+    # Connected components remove isolated remnants, not intentional large holes.
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    keep = stats[:, cv2.CC_STAT_AREA] >= max(4, 4 * radius * radius)
+    keep[0] = False
+    return np.where(keep[labels], 0, 255).astype(np.uint8)
 
 
 class StampHandler(http.server.BaseHTTPRequestHandler):
@@ -76,6 +101,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._handle_retrace()
         elif path == "/invert":
             self._handle_invert()
+        elif path == "/simplify":
+            self._handle_simplify()
         elif path == "/stamp":
             self._handle_stamp()
         else:
@@ -423,40 +450,82 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             if stats[lbl, cv2.CC_STAT_AREA] < min_speck:
                 bw[labels == lbl] = 255  # erase speck (set to white)
 
-        # 9. Write temp BMP, run potrace
+        # Trace and publish the PNG/SVG together only after all processing succeeds.
         ext_id = str(uuid.uuid4())[:8]
         tmp_dir = tempfile.mkdtemp()
-        bmp_path = os.path.join(tmp_dir, "extract.bmp")
-        svg_path = os.path.join(tmp_dir, "extract.svg")
-        png_path = os.path.join(tmp_dir, "extract.png")
-
-        cv2.imwrite(bmp_path, bw)
-        cv2.imwrite(png_path, bw)
-
-        try:
-            subprocess.run(
-                ["potrace", bmp_path, "-s", "--tight", "-o", svg_path],
-                check=True, capture_output=True
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self._send_error(500, f"potrace failed: {e}")
-            return
-
-        with open(svg_path) as f:
-            svg_content = f.read()
-
-        # Clean up BMP
-        os.unlink(bmp_path)
-
-        name = data.get("name", f"extract_{ext_id}")
-        extractions[ext_id] = {
-            "png_path": png_path,
-            "svg": svg_content,
-            "name": name,
+        rec = {
+            "png_path": os.path.join(tmp_dir, "extract.png"),
+            "name": data.get("name", f"extract_{ext_id}"),
         }
+        if not self._update_extraction(rec, bw, reset_baseline=True):
+            os.rmdir(tmp_dir)
+            return
+        extractions[ext_id] = rec
 
         print(f"  Extraction {ext_id}: {bw.shape[1]}x{bw.shape[0]}px → SVG")
-        self._send_json({"id": ext_id, "svg": svg_content})
+        self._send_json({"id": ext_id, "svg": rec["svg"], "fuzz": 0})
+
+    def _update_extraction(self, rec, bw, fuzz=0, reset_baseline=False):
+        """Stage both formats; a failed encode or trace leaves the record intact."""
+        try:
+            with tempfile.TemporaryDirectory(dir=os.path.dirname(rec["png_path"])) as tmp_dir:
+                png_path = os.path.join(tmp_dir, "result.png")
+                if not cv2.imwrite(png_path, bw):
+                    raise OSError("Could not encode extraction PNG")
+                if fuzz == 0 and not reset_baseline:
+                    svg_content = rec["baseline_svg"]
+                else:
+                    bmp_path = os.path.join(tmp_dir, "result.bmp")
+                    svg_path = os.path.join(tmp_dir, "result.svg")
+                    if not cv2.imwrite(bmp_path, bw):
+                        raise OSError("Could not encode tracing bitmap")
+                    subprocess.run(
+                        ["potrace", bmp_path, "-s", "--tight", "-o", svg_path],
+                        check=True, capture_output=True
+                    )
+                    with open(svg_path) as f:
+                        svg_content = f.read()
+                os.replace(png_path, rec["png_path"])
+        except (OSError, subprocess.CalledProcessError, cv2.error) as e:
+            self._send_error(500, f"Could not update extraction: {e}")
+            return False
+
+        rec.update(svg=svg_content, fuzz=fuzz)
+        if reset_baseline:
+            rec.update(baseline_bw=bw, baseline_svg=svg_content)
+        return True
+
+    # ── POST /simplify — always process the most recent edit baseline ──
+
+    def _handle_simplify(self):
+        try:
+            data = json.loads(self._read_body())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_error(400, "Invalid JSON")
+            return
+        if not isinstance(data, dict):
+            self._send_error(400, "Expected a JSON object")
+            return
+        fuzz = data.get("fuzz")
+        if type(fuzz) is not int or not 0 <= fuzz <= 100:
+            self._send_error(400, "fuzz must be a finite integer from 0 to 100")
+            return
+        ext_id = data.get("extraction_id")
+        rec = extractions.get(ext_id) if isinstance(ext_id, str) else None
+        if not rec:
+            self._send_error(404, "Extraction not found")
+            return
+        try:
+            bw = rec["baseline_bw"] if fuzz == 0 else simplify_bitmap(rec["baseline_bw"], fuzz)
+        except cv2.error as e:
+            self._send_error(500, f"Could not simplify extraction: {e}")
+            return
+        if fuzz > 0 and not np.any(bw == 0):
+            self._send_error(400, "Simplification removed all dark content; try a lower fuzz value")
+            return
+        if not self._update_extraction(rec, bw, fuzz=fuzz):
+            return
+        self._send_json({"id": ext_id, "svg": rec["svg"], "fuzz": fuzz})
 
     # ── POST /invert — invert extraction B&W and re-trace ──
 
@@ -478,37 +547,18 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._send_error(500, "Extraction PNG missing")
             return
 
-        # Read, invert, save
+        # Inversion becomes the new baseline only after tracing succeeds.
         bw = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
         if bw is None:
             self._send_error(500, "Could not read extraction PNG")
             return
 
         bw = cv2.bitwise_not(bw)
-        cv2.imwrite(png_path, bw)
 
-        # Re-trace with potrace
-        tmp_dir = tempfile.mkdtemp()
-        bmp_path = os.path.join(tmp_dir, "invert.bmp")
-        svg_path = os.path.join(tmp_dir, "invert.svg")
-        cv2.imwrite(bmp_path, bw)
-
-        try:
-            subprocess.run(
-                ["potrace", bmp_path, "-s", "--tight", "-o", svg_path],
-                check=True, capture_output=True
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self._send_error(500, f"potrace failed: {e}")
+        if not self._update_extraction(rec, bw, reset_baseline=True):
             return
-
-        with open(svg_path) as f:
-            svg_content = f.read()
-        os.unlink(bmp_path)
-
-        rec["svg"] = svg_content
         print(f"  Invert {ext_id}: {bw.shape[1]}x{bw.shape[0]}px → SVG")
-        self._send_json({"id": ext_id, "svg": svg_content})
+        self._send_json({"id": ext_id, "svg": rec["svg"], "fuzz": 0})
 
     # ── POST /retrace — receive edited PNG, re-run potrace ──
 
@@ -569,31 +619,10 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         # Threshold to clean B&W
         _, bw = cv2.threshold(bw, 128, 255, cv2.THRESH_BINARY)
 
-        # Save updated PNG
-        cv2.imwrite(rec["png_path"], bw)
-
-        # Re-trace with potrace
-        tmp_dir = tempfile.mkdtemp()
-        bmp_path = os.path.join(tmp_dir, "retrace.bmp")
-        svg_path = os.path.join(tmp_dir, "retrace.svg")
-        cv2.imwrite(bmp_path, bw)
-
-        try:
-            subprocess.run(
-                ["potrace", bmp_path, "-s", "--tight", "-o", svg_path],
-                check=True, capture_output=True
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self._send_error(500, f"potrace failed: {e}")
+        if not self._update_extraction(rec, bw, reset_baseline=True):
             return
-
-        with open(svg_path) as f:
-            svg_content = f.read()
-        os.unlink(bmp_path)
-
-        rec["svg"] = svg_content
         print(f"  Retrace {ext_id}: {bw.shape[1]}x{bw.shape[0]}px → SVG")
-        self._send_json({"id": ext_id, "svg": svg_content})
+        self._send_json({"id": ext_id, "svg": rec["svg"], "fuzz": 0})
 
     # ── POST /stamp → starts background job, returns job_id ──
 
@@ -602,6 +631,14 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             data = json.loads(self._read_body())
         except json.JSONDecodeError:
             self._send_error(400, "Invalid JSON")
+            return
+
+        if not isinstance(data, dict):
+            self._send_error(400, "Expected a JSON object")
+            return
+        mode = data.get("mode", "raised")
+        if mode not in ("raised", "concave"):
+            self._send_error(400, "mode must be raised or concave")
             return
 
         ext_id = data.get("extraction_id")
@@ -623,6 +660,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         print(f"  [stamp] Using SVG directly ({len(svg_content)} chars)")
 
         name = data.get("name", rec["name"])
+        if mode == "concave":
+            name += "_concave"
         size_mm = data.get("size_mm", "36")
         thin_lines = data.get("thin_lines", False)
         job_id = str(uuid.uuid4())[:8]
@@ -638,9 +677,14 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             try:
                 cmd = ["bash", PNG2STAMP, svg_path, output_base, str(size_mm)]
                 if thin_lines:
-                    cmd.append("0.25")
+                    cmd.append("auto")
+                else:
+                    cmd.append("0")
+                cmd.append(mode)
                 print(f"  [stamp] Running: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                env = os.environ.copy()
+                env["STAMP_PYTHON"] = sys.executable
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
                 print(f"  [stamp] stdout: {result.stdout[:500]}")
                 if result.stderr:
                     print(f"  [stamp] stderr: {result.stderr[:500]}")
@@ -710,7 +754,6 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def main():
-    import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
 
     # Try the requested port, then scan upward if busy

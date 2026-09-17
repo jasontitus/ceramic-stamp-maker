@@ -1,5 +1,6 @@
 # Virtual environment
 .venv/
+.venv.backup.*/
 __pycache__/
 
 # Large image/binary files

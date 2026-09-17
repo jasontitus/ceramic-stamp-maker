@@ -43,7 +43,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 
 .preview-row {
   display: flex; align-items: center; gap: 12px;
-  min-height: 120px;
+  min-height: 320px;
 }
 .preview-row .nav-btn {
   width: 36px; height: 36px; border-radius: 50%;
@@ -57,15 +57,15 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 .preview-card {
   flex: 1; display: flex; align-items: center; gap: 16px;
   background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px;
-  padding: 12px; min-height: 100px;
+  padding: 12px; min-height: 280px;
 }
 .preview-card .svg-display {
-  width: 140px; height: 100px; background: #fff; border-radius: 4px;
+  width: 340px; height: 280px; background: #fff; border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.preview-card .svg-display svg { max-width: 130px; max-height: 90px; }
-.preview-card .svg-display img { max-width: 130px; max-height: 90px; }
+.preview-card .svg-display svg { max-width: 320px; max-height: 260px; }
+.preview-card .svg-display img { max-width: 320px; max-height: 260px; }
 .preview-card .actions { display: flex; flex-direction: column; gap: 8px; }
 .preview-card .actions button {
   padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
@@ -76,6 +76,27 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 .preview-card .actions button.primary { background: #e94560; border-color: #e94560; color: #fff; }
 .preview-card .actions button.primary:hover { background: #c73550; }
 .preview-card .info { font-size: 12px; color: #888; }
+.preview-card .actions { width: 240px; max-width: 100%; }
+.preview-card .actions button:disabled { opacity: 0.45; cursor: default; }
+.control-group { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #ccc; }
+.control-group select {
+  padding: 6px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #1a1a2e; color: #e0e0e0; width: 100%;
+}
+.control-group input[type=range] { width: 100%; accent-color: #e94560; }
+.control-heading, .range-labels { display: flex; justify-content: space-between; }
+.control-help, .range-labels { font-size: 11px; color: #aaa; line-height: 1.4; }
+.control-heading output { color: #e94560; font-variant-numeric: tabular-nums; }
+.preview-card .info { margin-top: 8px; max-width: 240px; line-height: 1.4; }
+@media (max-width: 760px) {
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .preview-row { gap: 6px; }
+  .preview-card { flex-direction: column; min-width: 0; }
+  .preview-card .svg-display { width: 100%; max-width: 340px; height: 240px; }
+  .preview-card .svg-display svg { max-width: 100% !important; max-height: 220px !important; }
+  .preview-card > div:last-child { width: 100%; }
+  .preview-card .actions, .preview-card .info { width: 100%; max-width: none; }
+}
 
 .empty-state {
   display: flex; align-items: center; justify-content: center;
@@ -173,12 +194,30 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
       <div class="svg-display" id="svg-display"></div>
       <div>
         <div class="actions">
-          <button onclick="openEraser()">Paint / Erase</button>
-          <button onclick="invertExtraction()">Invert</button>
-          <button onclick="fillHoles()">Fill Holes</button>
-          <button onclick="downloadSvg()">Download SVG</button>
+          <button data-extraction-action onclick="openEraser()">Paint / Erase</button>
+          <button data-extraction-action onclick="invertExtraction()">Invert</button>
+          <button data-extraction-action onclick="fillHoles()">Fill Holes</button>
+          <button data-extraction-action onclick="downloadSvg()">Download SVG</button>
+          <div class="control-group">
+            <div class="control-heading">
+              <label for="fuzzing">Fuzzing</label>
+              <output id="fuzz-value" for="fuzzing">0</output>
+            </div>
+            <input type="range" id="fuzzing" min="0" max="100" step="1" value="0"
+              aria-describedby="fuzz-help" oninput="setFuzzIntent(this.value)" onchange="simplifyExtraction()">
+            <div class="range-labels" aria-hidden="true"><span>Off</span><span>Strong</span></div>
+            <p class="control-help" id="fuzz-help">Simplifies fine detail locally when released. No AI. Set to 0 to restore the original; adjustments never accumulate.</p>
+          </div>
+          <div class="control-group">
+            <label for="stamp-mode">Stamp face</label>
+            <select id="stamp-mode" aria-describedby="stamp-mode-help" onchange="invalidateStamp(); updateGallery()">
+              <option value="raised">Raised (recessed clay)</option>
+              <option value="concave">Concave (raised clay)</option>
+            </select>
+            <p class="control-help" id="stamp-mode-help">Raised features recess the clay. A concave stamp's surrounding face presses the clay, leaving a raised pattern and a border.</p>
+          </div>
           <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc">
-            <span id="size-label">36mm</span>
+            <span>Size</span> <span id="size-label">36mm</span>
             <input type="range" id="stamp-size" min="12" max="80" value="36" step="1"
               style="width:80px;vertical-align:middle"
               oninput="document.getElementById('size-label').textContent=this.value+'mm'; invalidateStamp(); updateGallery()">
@@ -190,7 +229,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
           </label>
           <button class="primary" id="btn-3mf" onclick="generateStamp()">Generate .3mf</button>
         </div>
-        <div class="info" id="preview-info"></div>
+        <div class="info" id="preview-info" role="status" aria-live="polite"></div>
       </div>
     </div>
     <button class="nav-btn" id="btn-next" onclick="navGallery(1)">&#9654;</button>
@@ -220,9 +259,30 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 let imageId = null;
 let imgW = 0, imgH = 0;
 let baseName = 'extract';  // derived from uploaded filename
-const results = []; // {id, svg, name, el}
+const results = []; // Stable result objects retain fuzzing and stamp jobs across navigation.
 let currentIdx = -1;
 let tool = 'rect';
+let settingsRevision = 0, viewRevision = 0;
+
+function extractionUpdating(r) {
+  return r && (r.processing || r.simplifying || r.editing || r.desiredFuzz !== r.fuzz);
+}
+
+function extractionBusy(r) {
+  return !r || !r.id || extractionUpdating(r);
+}
+
+function invalidateResult(r) {
+  r.revision = (r.revision || 0) + 1;
+  r.stampJob = null;
+}
+
+function selectResult(idx) {
+  if (currentIdx !== idx) viewRevision++;
+  if (currentIdx !== idx && eraserResult) closeEraser();
+  currentIdx = idx;
+  updateGallery();
+}
 
 // Canvas/viewport state
 const canvas = document.getElementById('canvas');
@@ -278,6 +338,10 @@ function hitTestSelection(ix, iy) {
 document.getElementById('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  viewRevision++;
+  results.forEach(invalidateResult);
+  if (eraserResult) closeEraser();
+  updateStampButton();
 
   const hint = document.getElementById('status-hint');
   hint.textContent = 'Uploading' + (file.name.match(/\.(eps|ps|ai)$/i) ? ' (converting EPS...)' : '...');
@@ -427,6 +491,9 @@ canvas.addEventListener('mousedown', (e) => {
   // Check if clicking on an existing selection → move it
   const hitIdx = hitTestSelection(pt.x, pt.y);
   if (hitIdx >= 0) {
+    if (extractionUpdating(results[hitIdx])) return;
+    invalidateResult(results[hitIdx]);
+    updateStampButton();
     moving = true;
     movingIdx = hitIdx;
     moveOffsetX = pt.x - selections[hitIdx].x;
@@ -509,6 +576,9 @@ canvas.addEventListener('contextmenu', (e) => {
   const pt = screenToImage(e.offsetX, e.offsetY);
   const hitIdx = hitTestSelection(pt.x, pt.y);
   if (hitIdx >= 0) {
+    if (extractionUpdating(results[hitIdx])) return;
+    invalidateResult(results[hitIdx]);
+    viewRevision++;
     selections.splice(hitIdx, 1);
     results.splice(hitIdx, 1);
     if (currentIdx >= results.length) currentIdx = results.length - 1;
@@ -532,46 +602,15 @@ wrap.addEventListener('wheel', (e) => {
 
 // ── Extract region ──
 async function extractRegion(sel, num) {
-  const idx = results.length;
-  const name = `${baseName}-extract-${num}`;
-  results.push({ id: null, svg: null, name, processing: true });
-  updateGallery();
-
-  try {
-    const res = await fetch('/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image_id: imageId,
-        x: sel.x, y: sel.y, w: sel.w, h: sel.h,
-        shape: sel.shape,
-        name,
-      }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      results[idx] = { id: null, svg: null, name, error: data.error, processing: false };
-    } else {
-      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
-    }
-  } catch (err) {
-    results[idx] = { id: null, svg: null, name, error: err.message, processing: false };
-  }
-
-  if (currentIdx === -1 || currentIdx === idx) {
-    currentIdx = idx;
-  }
-  updateGallery();
+  const r = { id: null, svg: null, name: `${baseName}-extract-${num}`,
+    processing: true, fuzz: 0, desiredFuzz: 0, revision: 0 };
+  results.push(r);
+  if (currentIdx === -1) selectResult(results.indexOf(r));
+  await requestExtraction(r, sel);
 }
 
-// Re-extract after moving a selection
-async function reExtract(selIdx) {
-  const sel = selections[selIdx];
-  if (!sel) return;
-  const name = results[selIdx] ? results[selIdx].name : `${baseName}-extract-${selIdx + 1}`;
-  results[selIdx] = { id: null, svg: null, name, processing: true };
+async function requestExtraction(r, sel, fill = false) {
   updateGallery();
-
   try {
     const res = await fetch('/extract', {
       method: 'POST',
@@ -579,21 +618,34 @@ async function reExtract(selIdx) {
       body: JSON.stringify({
         image_id: imageId,
         x: sel.x, y: sel.y, w: sel.w, h: sel.h,
-        shape: sel.shape,
-        name,
+        shape: sel.shape, name: r.name, fill_holes: fill,
       }),
     });
     const data = await res.json();
-    if (data.error) {
-      results[selIdx] = { id: null, svg: null, name, error: data.error, processing: false };
-    } else {
-      results[selIdx] = { id: data.id, svg: data.svg, name, processing: false };
-    }
+    if (!res.ok || data.error) throw new Error(data.error || 'Extraction failed');
+    if (!results.includes(r)) return;
+    r.id = data.id;
+    r.svg = data.svg;
+    r.fuzz = r.desiredFuzz = 0;
+    r.error = null;
   } catch (err) {
-    results[selIdx] = { id: null, svg: null, name, error: err.message, processing: false };
+    if (!results.includes(r)) return;
+    r.error = err.message;
+  } finally {
+    r.processing = false;
+    if (results.includes(r)) updateGallery();
   }
-  currentIdx = selIdx;
-  updateGallery();
+}
+
+// Moving or filling a selection establishes a fresh, unfuzzed baseline.
+async function reExtract(selIdx, fill = false) {
+  const sel = selections[selIdx];
+  const r = results[selIdx];
+  if (!sel || !r || extractionUpdating(r)) return;
+  invalidateResult(r);
+  r.processing = true;
+  r.error = null;
+  await requestExtraction(r, sel, fill);
 }
 
 // ── Thin-lines preview: add stroke to SVG paths to visualize thickening ──
@@ -607,12 +659,13 @@ function applyThinLinesPreview(svgEl) {
   // Read native SVG width (potrace outputs in pt, viewBox matches)
   const rawW = parseFloat(svgEl.getAttribute('width')) || 800;
   const stampSize = parseFloat(document.getElementById('stamp-size').value) || 36;
-  const thickenMm = 0.25;
+  // Match png2stamp.sh auto formula: 0.30*(1 - size/36), min 0
+  const thickenMm = Math.max(0, 0.30 * (1 - stampSize / 36));
+  // At 36mm+ thickening is 0 — show a minimum preview so checkbox is visibly responsive
+  const previewMm = Math.max(thickenMm, 0.15);
   // Convert thicken from stamp-mm to SVG coordinate units.
-  // In SCAD: offset(delta) applied after scale(design/svg), so in SVG coords:
-  //   delta_svg = thicken * rawW / stampSize
   // stroke-width extends W/2 outward, offset extends delta outward, so W = 2*delta
-  const strokeW = 2 * thickenMm * rawW / stampSize;
+  const strokeW = 2 * previewMm * rawW / stampSize;
   paths.forEach(p => {
     p.setAttribute('stroke', 'black');
     p.setAttribute('stroke-width', strokeW);
@@ -645,24 +698,24 @@ function updateGallery() {
   const display = document.getElementById('svg-display');
   const info = document.getElementById('preview-info');
 
-  if (r.processing) {
-    display.innerHTML = '<div class="stamp-spinner"></div>';
-    info.textContent = 'Processing...';
-  } else if (r.error) {
-    display.innerHTML = '<span style="color:#e94560;font-size:12px">Error</span>';
-    info.textContent = r.error;
-  } else if (r.svg) {
+  if (r.svg) {
     display.innerHTML = r.svg;
     const svgEl = display.querySelector('svg');
     if (svgEl) {
       applyThinLinesPreview(svgEl);  // before removing width (needs native size)
       svgEl.removeAttribute('width');
       svgEl.removeAttribute('height');
-      svgEl.style.maxWidth = '130px';
-      svgEl.style.maxHeight = '90px';
+      svgEl.style.maxWidth = '320px';
+      svgEl.style.maxHeight = '260px';
     }
-    info.textContent = r.name;
+  } else {
+    display.innerHTML = r.processing ? '<div class="stamp-spinner"></div>' :
+      '<span style="color:#e94560;font-size:12px">Error</span>';
   }
+  display.setAttribute('aria-busy', Boolean(r.processing || r.simplifying));
+  info.textContent = r.simplifying ? `Simplifying to ${r.desiredFuzz}… Previous preview shown.` :
+    r.processing ? 'Processing…' : r.error ? `${r.error}${r.svg ? ' Previous preview retained.' : ''}` : r.name;
+  updateExtractionControls(r);
 
   document.getElementById('btn-prev').disabled = currentIdx <= 0;
   document.getElementById('btn-next').disabled = currentIdx >= results.length - 1;
@@ -672,8 +725,8 @@ function updateGallery() {
   strip.innerHTML = '';
   results.forEach((r, i) => {
     const t = document.createElement('div');
-    t.className = 'thumb' + (i === currentIdx ? ' active' : '') + (r.processing ? ' processing' : '');
-    if (r.svg && !r.processing) {
+    t.className = 'thumb' + (i === currentIdx ? ' active' : '') + (r.processing || r.simplifying ? ' processing' : '');
+    if (r.svg) {
       t.innerHTML = r.svg;
       const svgEl = t.querySelector('svg');
       if (svgEl) {
@@ -688,7 +741,7 @@ function updateGallery() {
     label.className = 'label';
     label.textContent = i + 1;
     t.appendChild(label);
-    t.onclick = () => { currentIdx = i; updateGallery(); };
+    t.onclick = () => selectResult(i);
     strip.appendChild(t);
   });
 }
@@ -696,8 +749,7 @@ function updateGallery() {
 function navGallery(dir) {
   const next = currentIdx + dir;
   if (next >= 0 && next < results.length) {
-    currentIdx = next;
-    updateGallery();
+    selectResult(next);
   }
 }
 
@@ -709,20 +761,77 @@ function triggerDownload(url, filename) {
 // ── Download SVG ──
 function downloadSvg() {
   const r = results[currentIdx];
-  if (!r || !r.id) return;
+  if (extractionBusy(r)) return;
   triggerDownload(`/extraction/svg/${r.id}?dl=${encodeURIComponent(r.name + '.svg')}`, r.name + '.svg');
+}
+
+// ── Fuzzing: serialize requests so the server always ends on the latest intent ──
+function updateExtractionControls(r) {
+  document.querySelectorAll('[data-extraction-action]').forEach(button => {
+    button.disabled = extractionBusy(r);
+  });
+  const slider = document.getElementById('fuzzing');
+  slider.disabled = !r || !r.id || r.processing || r.editing;
+  slider.value = r ? r.desiredFuzz : 0;
+  document.getElementById('fuzz-value').value = slider.value;
+}
+
+function setFuzzIntent(value) {
+  const r = results[currentIdx];
+  if (!r || !r.id || r.processing || r.editing) return;
+  r.desiredFuzz = Number(value);
+  r.error = null;
+  invalidateResult(r);
+  updateExtractionControls(r);
+  updateStampButton();
+}
+
+async function simplifyExtraction() {
+  const r = results[currentIdx];
+  if (!r || !r.id || r.processing || r.editing) return;
+  r.fuzzTarget = r.desiredFuzz;
+  if (r.simplifying || r.fuzzTarget === r.fuzz) return;
+  r.simplifying = true;
+  updateGallery();
+  try {
+    while (results.includes(r) && r.fuzzTarget !== r.fuzz) {
+      const fuzz = r.fuzzTarget;
+      try {
+        const res = await fetch('/simplify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ extraction_id: r.id, fuzz }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Simplification failed');
+        if (!results.includes(r)) return;
+        r.id = data.id;
+        r.svg = data.svg;
+        r.fuzz = data.fuzz;
+        r.error = null;
+      } catch (err) {
+        if (!results.includes(r)) return;
+        if (r.fuzzTarget !== fuzz) continue;
+        r.error = 'Fuzzing failed: ' + err.message;
+        r.fuzzTarget = r.fuzz;
+        if (r.desiredFuzz === fuzz) r.desiredFuzz = r.fuzz;
+        break;
+      }
+    }
+  } finally {
+    r.simplifying = false;
+    if (results.includes(r)) updateGallery();
+  }
 }
 
 // ── Invert B&W ──
 async function invertExtraction() {
-  const idx = currentIdx;
-  const r = results[idx];
-  if (!r || !r.id) return;
-
+  const r = results[currentIdx];
+  if (extractionBusy(r)) return;
   r.processing = true;
-  delete stampJobs[idx];
+  r.error = null;
+  invalidateResult(r);
   updateGallery();
-
   try {
     const res = await fetch('/invert', {
       method: 'POST',
@@ -730,149 +839,138 @@ async function invertExtraction() {
       body: JSON.stringify({ extraction_id: r.id }),
     });
     const data = await res.json();
-    if (data.error) {
-      r.error = data.error;
-    } else {
-      r.svg = data.svg;
-    }
+    if (!res.ok || data.error) throw new Error(data.error || 'Inversion failed');
+    if (!results.includes(r)) return;
+    r.id = data.id;
+    r.svg = data.svg;
+    r.fuzz = r.desiredFuzz = 0;
   } catch (err) {
     r.error = err.message;
+  } finally {
+    r.processing = false;
+    if (results.includes(r)) updateGallery();
   }
-  r.processing = false;
-  updateGallery();
 }
 
 // ── Fill Holes ──
 async function fillHoles() {
-  const idx = currentIdx;
-  const sel = selections[idx];
-  if (!sel || !imageId) return;
-
-  const name = results[idx] ? results[idx].name : `${baseName}-extract-${idx + 1}`;
-  results[idx] = { id: null, svg: null, name, processing: true };
-  // Clear any previous stamp job for this index since the SVG will change
-  delete stampJobs[idx];
-  updateGallery();
-
-  try {
-    const res = await fetch('/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image_id: imageId,
-        x: sel.x, y: sel.y, w: sel.w, h: sel.h,
-        shape: sel.shape,
-        name,
-        fill_holes: true,
-      }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      results[idx] = { id: null, svg: null, name, error: data.error, processing: false };
-    } else {
-      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
-    }
-  } catch (err) {
-    results[idx] = { id: null, svg: null, name, error: err.message, processing: false };
-  }
-  currentIdx = idx;
-  updateGallery();
+  await reExtract(currentIdx, true);
 }
 
 // ── Generate .3mf (non-blocking) ──
-// Track active stamp jobs per result index
-const stampJobs = {}; // resultIdx -> {jobId, status}
+function stampSettings() {
+  return {
+    size_mm: document.getElementById('stamp-size').value,
+    thin_lines: document.getElementById('thin-lines').checked,
+    mode: document.getElementById('stamp-mode').value,
+  };
+}
+
+function stampKey(r) {
+  return JSON.stringify([r.id, r.revision, settingsRevision, stampSettings()]);
+}
+
+function jobIsCurrent(r, job) {
+  return results.includes(r) && r.stampJob === job && job.key === stampKey(r);
+}
 
 async function generateStamp() {
-  const idx = currentIdx;
-  const r = results[idx];
-  if (!r || !r.id) return;
-
-  // Don't start another if already running for this extraction
-  if (stampJobs[idx] && stampJobs[idx].status === 'running') return;
-
+  const r = results[currentIdx];
+  if (extractionBusy(r)) return;
+  if (r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running') return;
+  // Reserve before the POST: even a settings change while it is pending invalidates it.
+  const job = { key: stampKey(r), view: viewRevision, status: 'running', jobId: null };
+  r.stampJob = job;
+  updateStampButton();
   try {
     const res = await fetch('/stamp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ extraction_id: r.id, name: r.name, size_mm: document.getElementById('stamp-size').value, thin_lines: document.getElementById('thin-lines').checked }),
+      body: JSON.stringify({ extraction_id: r.id, name: r.name, ...stampSettings() }),
     });
     const data = await res.json();
-    if (data.error) {
-      alert('Stamp generation failed: ' + data.error);
-      return;
-    }
-    stampJobs[idx] = { jobId: data.job_id, status: 'running' };
-    updateStampButton();
-    pollStampJob(idx, data.job_id);
+    if (!jobIsCurrent(r, job)) return;
+    if (!res.ok || data.error) throw new Error(data.error || 'Stamp generation failed');
+    job.jobId = data.job_id;
+    await pollStampJob(r, job);
   } catch (err) {
-    alert('Error: ' + err.message);
+    if (!jobIsCurrent(r, job)) return;
+    job.status = 'error';
+    updateStampButton();
+    if (results[currentIdx] === r) alert('Stamp generation failed: ' + err.message);
   }
 }
 
-async function pollStampJob(idx, jobId) {
+async function pollStampJob(r, job) {
   const maxPolls = 200; // 200 * 2s = ~6.5 min max
   let failures = 0;
   for (let i = 0; i < maxPolls; i++) {
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!jobIsCurrent(r, job)) return;
     try {
-      const res = await fetch(`/stamp/status/${jobId}`);
+      const res = await fetch(`/stamp/status/${job.jobId}`);
+      const data = await res.json();
+      if (!jobIsCurrent(r, job)) return;
       if (!res.ok) { failures++; if (failures > 5) break; continue; }
       failures = 0;
-      const data = await res.json();
       if (data.status === 'done') {
-        stampJobs[idx] = { jobId, status: 'done' };
+        job.status = 'done';
         updateStampButton();
-        triggerDownload(`/stamp/download/${jobId}`, (data.name || results[idx].name) + '.3mf');
+        if (results[currentIdx] === r && viewRevision === job.view && !extractionBusy(r)) {
+          triggerDownload(`/stamp/download/${job.jobId}`, (data.name || r.name) + '.3mf');
+        }
         return;
       }
       if (data.status === 'error') {
-        stampJobs[idx] = { jobId, status: 'error', error: data.error };
+        job.status = 'error';
         updateStampButton();
-        alert('Stamp failed: ' + (data.error || 'Unknown error'));
+        if (results[currentIdx] === r) alert('Stamp failed: ' + (data.error || 'Unknown error'));
         return;
       }
     } catch (err) {
+      if (!jobIsCurrent(r, job)) return;
       failures++;
       if (failures > 5) break;
     }
   }
-  // Timed out or too many failures
-  stampJobs[idx] = { jobId, status: 'error', error: 'Timed out or lost connection' };
+  if (!jobIsCurrent(r, job)) return;
+  job.status = 'error';
   updateStampButton();
+  if (results[currentIdx] === r) alert('Stamp generation timed out or lost connection. Try again.');
 }
 
 function invalidateStamp() {
-  // Size changed — clear cached stamp job so next click regenerates
-  if (stampJobs[currentIdx] && stampJobs[currentIdx].status === 'done') {
-    delete stampJobs[currentIdx];
-    updateStampButton();
-  }
+  // Settings are shared by all extractions, including jobs still starting or polling.
+  settingsRevision++;
+  results.forEach(r => { r.stampJob = null; });
+  updateStampButton();
 }
 
 function updateStampButton() {
   const btn = document.getElementById('btn-3mf');
-  const job = stampJobs[currentIdx];
-  if (job && job.status === 'running') {
+  const r = results[currentIdx];
+  const job = r && r.stampJob;
+  btn.onclick = generateStamp;
+  btn.disabled = extractionBusy(r);
+  if (job && jobIsCurrent(r, job) && job.status === 'running') {
     btn.innerHTML = '<span class="stamp-spinner"></span>Generating...';
     btn.disabled = true;
-  } else if (job && job.status === 'done') {
-    btn.innerHTML = 'Download .3mf';
-    btn.disabled = false;
+  } else if (job && jobIsCurrent(r, job) && job.status === 'done') {
+    btn.textContent = 'Download .3mf';
     btn.onclick = () => {
-      triggerDownload(`/stamp/download/${job.jobId}`, results[currentIdx].name + '.3mf');
+      if (results[currentIdx] === r && jobIsCurrent(r, job) && !extractionBusy(r)) {
+        triggerDownload(`/stamp/download/${job.jobId}`, r.name + '.3mf');
+      }
     };
   } else {
-    btn.innerHTML = 'Generate .3mf';
-    btn.disabled = false;
-    btn.onclick = generateStamp;
+    btn.textContent = 'Generate .3mf';
   }
 }
 
 // ── Eraser ──
 let eraserOpen = false, eraserCtx = null, eraserImg = null;
 let erasing = false, brushRadius = 15, brushMode = 'erase';
-let eraserExtId = null, eraserResultIdx = -1;
+let eraserResult = null;
 
 function setBrushMode(mode) {
   brushMode = mode;
@@ -882,9 +980,11 @@ function setBrushMode(mode) {
 
 function openEraser() {
   const r = results[currentIdx];
-  if (!r || !r.id) return;
-  eraserExtId = r.id;
-  eraserResultIdx = currentIdx;
+  if (extractionBusy(r) || eraserResult) return;
+  eraserResult = r;
+  r.editing = true;
+  viewRevision++;
+  updateGallery();
 
   const overlay = document.getElementById('eraser-overlay');
   const eCanvas = document.getElementById('eraser-canvas');
@@ -893,6 +993,7 @@ function openEraser() {
   // Load the extraction's B&W PNG
   eraserImg = new Image();
   eraserImg.onload = () => {
+    if (eraserResult !== r || !results.includes(r)) return;
     // Scale to fit viewport while keeping crisp
     const maxW = window.innerWidth * 0.85;
     const maxH = window.innerHeight * 0.65;
@@ -904,6 +1005,11 @@ function openEraser() {
     overlay.classList.add('open');
     eraserOpen = true;
   };
+  eraserImg.onerror = () => {
+    if (eraserResult !== r) return;
+    r.error = 'Could not load the image for editing.';
+    closeEraser();
+  };
   eraserImg.src = `/extraction/png/${r.id}?t=${Date.now()}`;
 
   document.getElementById('eraser-brush-size').value = brushRadius;
@@ -913,36 +1019,39 @@ function openEraser() {
 function closeEraser() {
   document.getElementById('eraser-overlay').classList.remove('open');
   eraserOpen = false;
+  document.getElementById('eraser-cursor').style.display = 'none';
+  if (eraserResult) eraserResult.editing = false;
+  eraserResult = null;
+  updateGallery();
 }
 
 async function applyEraser() {
+  const r = eraserResult;
+  if (!r || r.processing || !results.includes(r)) return;
+  r.processing = true;
+  r.error = null;
+  invalidateResult(r);
   const eCanvas = document.getElementById('eraser-canvas');
-  // Send the edited canvas back as PNG
-  const blob = await new Promise(r => eCanvas.toBlob(r, 'image/png'));
-  const form = new FormData();
-  form.append('extraction_id', eraserExtId);
-  form.append('image', blob, 'edited.png');
-
   closeEraser();
-  const idx = eraserResultIdx;
-  const name = results[idx].name;
-  results[idx] = { id: null, svg: null, name, processing: true };
-  delete stampJobs[idx];
-  updateGallery();
-
   try {
+    const blob = await new Promise(resolve => eCanvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('Could not export the edited image');
+    const form = new FormData();
+    form.append('extraction_id', r.id);
+    form.append('image', blob, 'edited.png');
     const res = await fetch('/retrace', { method: 'POST', body: form });
     const data = await res.json();
-    if (data.error) {
-      results[idx] = { id: eraserExtId, svg: null, name, error: data.error, processing: false };
-    } else {
-      results[idx] = { id: data.id, svg: data.svg, name, processing: false };
-    }
+    if (!res.ok || data.error) throw new Error(data.error || 'Retracing failed');
+    if (!results.includes(r)) return;
+    r.id = data.id;
+    r.svg = data.svg;
+    r.fuzz = r.desiredFuzz = 0;
   } catch (err) {
-    results[idx] = { id: eraserExtId, svg: null, name, error: err.message, processing: false };
+    r.error = err.message;
+  } finally {
+    r.processing = false;
+    if (results.includes(r)) updateGallery();
   }
-  currentIdx = idx;
-  updateGallery();
 }
 
 // Eraser canvas mouse events

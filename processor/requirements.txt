@@ -1,0 +1,5 @@
+# Python 3.13; shared by the web server and all image/conversion scripts.
+# Keep the headless OpenCV package only (other variants also install cv2).
+numpy==2.5.3
+opencv-python-headless==4.14.0.94
+Pillow==12.3.0

@@ -1,17 +1,31 @@
 #!/bin/bash
-# png2stamp.sh - Convert a PNG image to a 3D-printable ceramic debossing stamp
+# png2stamp.sh - Convert PNG/SVG artwork to a 3D-printable ceramic stamp
 #
-# Usage: ./png2stamp.sh input.png [output_base] [size_mm]
+# Usage: ./png2stamp.sh input.png [output_base] [size_mm] [thicken_mm] [raised|concave]
 #
 # Produces a .3mf file ready to open in Bambu Studio with all print
 # settings pre-configured. Print face UP for sharpest detail.
 #
-# The base plate follows the design outline so ONLY the pattern
-# imprints into clay — no blank edges or corners.
+# Raised faces press the artwork into clay; concave faces leave raised artwork.
+# Concave faces include a surrounding pressing surface and a solid cavity floor.
 #
 # Dependencies: python3 + Pillow, potrace, openscad
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The server supplies its interpreter; direct CLI calls use the project venv.
+PYTHON="${STAMP_PYTHON:-$SCRIPT_DIR/processor/.venv/bin/python}"
+if [[ ! -x "$PYTHON" ]]; then
+    echo "Project Python missing. Run: bash \"$SCRIPT_DIR/processor/setup.sh\"" >&2
+    exit 1
+fi
+for brew_bin in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "$brew_bin/brew" ]]; then
+        export PATH="$brew_bin:$PATH"
+        break
+    fi
+done
 
 # ===================== STAMP PARAMETERS =====================
 # These are reference values for a 36mm stamp; they scale for other sizes
@@ -25,13 +39,15 @@ HANDLE_D=12            # mm - handle shaft diameter
 # =============================================================
 
 usage() {
-    echo "Usage: $0 <input.png> [output_base] [size_mm] [thicken_mm]"
+    echo "Usage: $0 <input.png|input.svg> [output_base] [size_mm] [thicken_mm] [raised|concave]"
     echo ""
     echo "  input.png    Black-on-white (or transparent) PNG of your design"
     echo "  output_base  Base name for outputs (default: <input>_stamp)"
     echo "  size_mm      Design face size in mm (default: 18 for ~1.8cm)"
     echo "  thicken_mm   Override feature thickening in mm (default: auto)"
     echo "               Use 0.25 for thin-line sources like hatched artwork"
+    echo "  mode         raised (default): recessed artwork in clay"
+    echo "               concave: raised artwork in clay, with a surrounding impression"
     echo ""
     echo "Produces:"
     echo "  *_stamp.3mf   - Bambu Studio project (open directly, settings included)"
@@ -51,6 +67,11 @@ INPUT_EXT="${INPUT_FILE##*.}"
 BASENAME="$(basename "$INPUT_FILE" ".$INPUT_EXT")"
 OUT_DIR="$(dirname "$INPUT_FILE")"
 STAMP_SIZE="${3:-18}"
+STAMP_MODE="${5:-raised}"
+case "$STAMP_MODE" in
+    raised|concave) ;;
+    *) echo "Error: mode must be raised or concave" >&2; exit 1 ;;
+esac
 # When input is SVG, skip bitmap conversion and potrace (use SVG directly)
 SVG_INPUT=false
 if [[ "$INPUT_EXT" == "svg" || "$INPUT_EXT" == "SVG" ]]; then
@@ -68,11 +89,11 @@ BEVEL=$(awk "BEGIN{v=$REF_BEVEL*$STAMP_SIZE/$REF_SIZE; printf \"%.2f\", (v<0.05?
 # drops them. This offset (applied in stamp-mm AFTER scaling) compensates.
 # Auto: 0 at 36mm+, ~0.15mm at 18mm, ~0.20mm at 12mm.
 # Override: pass thicken_mm as 4th arg (e.g. 0.25 for thin-line sources).
-THICKEN_OVERRIDE="${4:-}"
-if [[ -n "$THICKEN_OVERRIDE" ]]; then
-    MIN_THICKEN="$THICKEN_OVERRIDE"
-else
+THICKEN_ARG="${4:-auto}"
+if [[ "$THICKEN_ARG" == "auto" ]]; then
     MIN_THICKEN=$(awk "BEGIN{v=0.30*(1-$STAMP_SIZE/36); printf \"%.2f\", (v<0?0:v)}")
+else
+    MIN_THICKEN="$THICKEN_ARG"
 fi
 OUTPUT_BASE="${2:-${OUT_DIR}/${BASENAME}_stamp}"
 OUTPUT_BASE="${OUTPUT_BASE%.3mf}"
@@ -84,23 +105,25 @@ OUTPUT_SVG="${OUTPUT_BASE}.svg"
 OUTPUT_SCAD="${OUTPUT_BASE}.scad"
 
 # ── Check dependencies ──
-# Prefer nightly OpenSCAD (much faster CGAL) over homebrew version
-if [[ -x "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" ]]; then
-    OPENSCAD="/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
-else
-    OPENSCAD="openscad"
+# Preserve an explicit renderer override, otherwise prefer the installed app.
+if [[ -z "${OPENSCAD:-}" ]]; then
+    if [[ -x "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" ]]; then
+        OPENSCAD="/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+    else
+        OPENSCAD="openscad"
+    fi
 fi
 
 MISSING=()
-command -v python3  &>/dev/null || MISSING+=("python3")
 command -v potrace  &>/dev/null || MISSING+=("potrace")
 command -v "$OPENSCAD" &>/dev/null || MISSING+=("openscad")
+command -v bc &>/dev/null || MISSING+=("bc")
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo "Error: Missing dependencies: ${MISSING[*]}"
     exit 1
 fi
-python3 -c "from PIL import Image" 2>/dev/null || {
-    echo "Error: Python Pillow required. Install with: pip3 install Pillow"
+"$PYTHON" -c "from PIL import Image" 2>/dev/null || {
+    echo "Project Pillow missing. Run: bash \"$SCRIPT_DIR/processor/setup.sh\""
     exit 1
 }
 
@@ -108,7 +131,7 @@ python3 -c "from PIL import Image" 2>/dev/null || {
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-echo "=== Ceramic Debossing Stamp Generator ==="
+echo "=== Ceramic Stamp Generator (${STAMP_MODE}) ==="
 echo "  Input:  $INPUT_FILE"
 echo "  Output: $OUTPUT_3MF"
 echo "  Face:   ${STAMP_SIZE}mm (~$(echo "scale=1; $STAMP_SIZE/10" | bc)cm)"
@@ -122,7 +145,7 @@ if $SVG_INPUT; then
 else
     # ── Step 1: Flatten alpha, convert to monochrome PBM ──
     echo "[1/5] Preparing image..."
-    python3 - "$INPUT_FILE" "$WORK/input.pbm" << 'PYEOF'
+    "$PYTHON" - "$INPUT_FILE" "$WORK/input.pbm" << 'PYEOF'
 import sys
 from PIL import Image
 
@@ -167,7 +190,7 @@ fi
 # Read native SVG size, compute design dimensions.
 # Keep SVG at its native size so OpenSCAD imports at high resolution.
 # SCAD scales to actual stamp size — preserves thin connections.
-DIMS=$(python3 - "$OUTPUT_SVG" "$STAMP_SIZE" << 'PYSVG'
+DIMS=$("$PYTHON" - "$OUTPUT_SVG" "$STAMP_SIZE" << 'PYSVG'
 import re, sys
 svg = open(sys.argv[1]).read()
 stamp = float(sys.argv[2])
@@ -205,12 +228,12 @@ SVG_FILE="$(basename "$OUTPUT_SVG")"
 
 cat > "$OUTPUT_SCAD" << OPENSCAD
 // ============================================
-// Ceramic Debossing Stamp
+// Ceramic Stamp (${STAMP_MODE})
 // Generated by png2stamp.sh
 //
 // PRINT FACE UP for sharpest edges.
-// Base plate follows design outline so ONLY
-// the pattern imprints into clay.
+// Concave mode recesses the artwork into a solid surrounding face.
+// Raised mode presses the artwork into the clay.
 //
 // To customize: edit parameters below, then
 // re-export with: openscad -o output.stl this_file.scad
@@ -225,6 +248,7 @@ base_offset    = ${BASE_OFFSET};     // mm - structural margin around design
 handle_height  = ${HANDLE_HEIGHT};   // mm - total handle height
 handle_d       = ${HANDLE_D};        // mm - handle shaft diameter
 bevel          = ${BEVEL};           // mm - edge chamfer for clay release
+stamp_mode     = "${STAMP_MODE}";
 
 // Computed
 max_dim        = max(design_w, design_h);
@@ -252,6 +276,13 @@ module design_2d() {
         import("${SVG_FILE}", center = true);
 }
 
+// A continuous pressing face around all artwork, including disconnected motifs.
+// Keep the cavity enclosed and support islands inside holes with a solid floor.
+module concave_outline_2d() {
+    offset(r = base_offset)
+        hull() design_2d();
+}
+
 // Small overlap at joints to ensure manifold mesh
 e = 0.01;
 
@@ -269,22 +300,35 @@ union() {
     translate([0, 0, palm_h + shaft_h])
         cylinder(h = transition_h + e, d1 = handle_d, d2 = cone_top_d);
 
-    // === BASE PLATE (exact design outline) ===
-    translate([0, 0, z_base])
-        linear_extrude(height = base_thick + e)
-            design_2d();
+    if (stamp_mode == "concave") {
+        // Leave base_thick of solid material below the cavity.
+        translate([0, 0, z_base])
+            difference() {
+                linear_extrude(height = base_thick + design_depth, convexity = 10)
+                    concave_outline_2d();
+                translate([0, 0, base_thick])
+                    linear_extrude(height = design_depth + e, convexity = 10)
+                        design_2d();
+                // Widen the mouth, rather than narrowing it and trapping clay.
+                translate([0, 0, base_thick + design_depth - bevel])
+                    linear_extrude(height = bevel + e, convexity = 10)
+                        offset(delta = bevel) design_2d();
+            }
+    } else {
+        // === BASE PLATE (exact design outline) ===
+        translate([0, 0, z_base])
+            linear_extrude(height = base_thick + e)
+                design_2d();
 
-    // === DESIGN FEATURES (top, stamp face UP) ===
-    translate([0, 0, z_design]) {
-        // Main body
-        linear_extrude(height = design_depth - bevel + e, convexity = 10)
-            design_2d();
-
-        // Beveled top edge: slightly inset for clean clay release
-        translate([0, 0, design_depth - bevel])
-            linear_extrude(height = bevel, convexity = 10)
-            offset(delta = -bevel)
-            design_2d();
+        // === DESIGN FEATURES (top, stamp face UP) ===
+        translate([0, 0, z_design]) {
+            linear_extrude(height = design_depth - bevel + e, convexity = 10)
+                design_2d();
+            translate([0, 0, design_depth - bevel])
+                linear_extrude(height = bevel, convexity = 10)
+                offset(delta = -bevel)
+                design_2d();
+        }
     }
 }
 OPENSCAD
@@ -309,7 +353,7 @@ fi
 # ── Step 5: Inject Bambu Studio settings into the .3mf ──
 echo "[5/5] Adding Bambu Studio print settings..."
 
-python3 - "$OUTPUT_3MF" << 'PY3MF'
+"$PYTHON" - "$OUTPUT_3MF" << 'PY3MF'
 import sys, zipfile, os, tempfile, shutil
 
 tmf_path = sys.argv[1]
@@ -396,9 +440,9 @@ if [[ -f "$OUTPUT_3MF" && -s "$OUTPUT_3MF" ]]; then
     echo "  Bambu Studio project: $OUTPUT_3MF ($TMF_SIZE)"
     echo "  Also saved:  .stl ($STL_SIZE), .scad, .svg"
     echo ""
-    echo "  Design:       ${DESIGN_W} x ${DESIGN_H}mm, ${DESIGN_DEPTH}mm raised"
-    echo "  Thicken:      ${MIN_THICKEN}mm${THICKEN_OVERRIDE:+ (override)}"
-    echo "  Base plate:   follows design outline + ${BASE_OFFSET}mm margin"
+    echo "  Design:       ${DESIGN_W} x ${DESIGN_H}mm, ${DESIGN_DEPTH}mm relief (${STAMP_MODE})"
+    echo "  Thicken:      ${MIN_THICKEN}mm"
+    echo "  Base plate:   ${BASE_THICKNESS}mm solid backing"
     echo "  Bevel:        ${BEVEL}mm edge chamfer"
     echo "  Total height: ${TOTAL_H}mm"
     echo ""

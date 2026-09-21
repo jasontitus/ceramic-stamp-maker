@@ -34,7 +34,6 @@ if [[ "$MODE" == "--install-system" ]]; then
     command -v potrace >/dev/null || formulae+=(potrace)
     command -v gs >/dev/null || formulae+=(ghostscript)
     command -v rsvg-convert >/dev/null || formulae+=(librsvg)
-    command -v bc >/dev/null || formulae+=(bc)
     if [[ ${#formulae[@]} -gt 0 ]]; then
         brew install "${formulae[@]}"
     fi
@@ -95,14 +94,17 @@ for conflicting in ("opencv-python", "opencv-contrib-python", "opencv-contrib-py
 import cv2
 import numpy as np
 from PIL import Image
+from pillow_heif import libheif_info, register_heif_opener
+register_heif_opener(thumbnails=False)
 # Exercise the compiled NumPy/OpenCV boundary, not just package metadata.
 cv2.GaussianBlur(np.zeros((5, 5), dtype=np.uint8), (3, 3), 0)
 Image.new("L", (1, 1))
+print(f"  HEIF decoder: libheif {libheif_info()['libheif']}")
 print(f"  Python {sys.version.split()[0]}: {sys.executable}")
 PY
 
 missing=()
-for tool in potrace gs rsvg-convert bc; do
+for tool in potrace gs rsvg-convert; do
     command -v "$tool" >/dev/null || missing+=("$tool")
 done
 OPENSCAD="${OPENSCAD:-}"
@@ -117,7 +119,7 @@ command -v "$OPENSCAD" >/dev/null || missing+=(openscad)
 if [[ ${#missing[@]} -gt 0 ]]; then
     echo "Missing native tools: ${missing[*]}" >&2
     echo "macOS: bash processor/setup.sh --install-system" >&2
-    echo "Linux: install potrace, ghostscript, librsvg2-bin, openscad and bc with your package manager." >&2
+    echo "Linux: install potrace, ghostscript, librsvg2-bin and openscad with your package manager." >&2
     exit 1
 fi
 potrace --version

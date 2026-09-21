@@ -66,7 +66,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 }
 .preview-card .svg-display svg { max-width: 320px; max-height: 260px; }
 .preview-card .svg-display img { max-width: 320px; max-height: 260px; }
-.preview-card .actions { display: flex; flex-direction: column; gap: 8px; }
+.preview-card .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .preview-card .actions button {
   padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
   background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 13px;
@@ -76,19 +76,29 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 .preview-card .actions button.primary { background: #e94560; border-color: #e94560; color: #fff; }
 .preview-card .actions button.primary:hover { background: #c73550; }
 .preview-card .info { font-size: 12px; color: #888; }
-.preview-card .actions { width: 240px; max-width: 100%; }
+.preview-card > div:last-child { flex: 1; min-width: 0; }
+.preview-card .actions { width: 520px; max-width: 100%; }
+.preview-card .actions .size-preset { white-space: normal; }
+.control-wide { grid-column: 1 / -1; }
+.dimensions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dimension-summary { color: #c7d8e8; font-variant-numeric: tabular-nums; }
+.dimension-error { color: #ff9bad; }
+.thin-lines-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; }
 .preview-card .actions button:disabled { opacity: 0.45; cursor: default; }
-.control-group { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #ccc; }
-.control-group select {
+.control-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12px; color: #ccc; }
+.control-group select, .control-group input[type=number] {
   padding: 6px; border: 1px solid #0f3460; border-radius: 6px;
   background: #1a1a2e; color: #e0e0e0; width: 100%;
 }
+.control-group input[readonly] { color: #aaa; background: #16213e; }
+.control-group input[aria-invalid=true] { border-color: #e94560; }
+.control-group :disabled { opacity: .5; cursor: not-allowed; }
 .control-group input[type=range] { width: 100%; accent-color: #e94560; }
 .control-heading, .range-labels { display: flex; justify-content: space-between; }
 .control-help, .range-labels { font-size: 11px; color: #aaa; line-height: 1.4; }
 .control-heading output { color: #e94560; font-variant-numeric: tabular-nums; }
-.preview-card .info { margin-top: 8px; max-width: 240px; line-height: 1.4; }
-@media (max-width: 760px) {
+.preview-card .info { margin-top: 8px; line-height: 1.4; }
+@media (max-width: 960px) {
   .toolbar { flex-wrap: wrap; gap: 8px; }
   .preview-row { gap: 6px; }
   .preview-card { flex-direction: column; min-width: 0; }
@@ -97,6 +107,62 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
   .preview-card > div:last-child { width: 100%; }
   .preview-card .actions, .preview-card .info { width: 100%; max-width: none; }
 }
+@media (max-width: 600px) {
+  .preview-row { flex-wrap: wrap; }
+  .preview-card { order: -1; flex-basis: 100%; }
+  #btn-prev { margin-right: auto; }
+}
+
+/* Physical-scale detail gallery, deliberately separate from stamp controls. */
+.nozzle-check { margin-top: 20px; padding: 20px; border: 1px solid #0f3460; border-radius: 8px; background: #1a1a2e; }
+.nozzle-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.nozzle-header h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+.nozzle-eyebrow { color: #e94560; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+.nozzle-copy { max-width: 85ch; color: #aeb9cc; font-size: 12px; line-height: 1.6; }
+.nozzle-check button, .nozzle-dialog button, .nozzle-dialog select {
+  border: 1px solid #0f3460; border-radius: 6px; background: #16213e; color: #e0e0e0; font: inherit; cursor: pointer;
+}
+.nozzle-check button:focus-visible, .nozzle-dialog :focus-visible { outline: 2px solid #e94560; outline-offset: 4px; }
+.nozzle-check .compare-button { flex-shrink: 0; padding: 10px 18px; background: #e94560; border-color: #e94560; font-size: 13px; }
+.nozzle-check button:disabled { opacity: .45; cursor: default; }
+.nozzle-status { min-height: 1.6em; margin-top: 14px; font-size: 12px; color: #aeb9cc; }
+.nozzle-status.error { color: #ff9bad; }
+.nozzle-summary { margin-top: 16px; color: #c7d8e8; font-size: 13px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.preservation-report { margin-top: 10px; color: #c7d8e8; font-size: 12px; line-height: 1.6; }
+.preservation-report.has-conflicts { color: #ff9bad; }
+.nozzle-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 12px 0 16px; list-style: none; color: #c7d8e8; font-size: 12px; }
+.nozzle-legend li { display: flex; align-items: center; gap: 7px; }
+.nozzle-swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid #8591a5; background: #000; }
+.nozzle-swatch.lost { background: #e94560; border-color: #e94560; }
+.nozzle-swatch.extra { background: #f0a500; border-color: #f0a500; }
+.nozzle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.nozzle-check .nozzle-card { display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; text-align: left; background: #16213e; transition: border-color .15s; }
+.nozzle-check .nozzle-card:hover { border-color: #e94560; }
+.nozzle-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #eee; }
+.nozzle-card-copy { display: flex; flex-direction: column; gap: 7px; width: 100%; padding: 14px 12px; }
+.nozzle-card-title { font-size: 14px; font-weight: 600; }
+.nozzle-card-line, .nozzle-card-inspect { font-size: 11px; color: #aeb9cc; line-height: 1.4; }
+.nozzle-card-metrics { font-size: 12px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.nozzle-lost { color: #ff9bad; }
+.nozzle-extra { color: #f0a500; }
+.nozzle-card-inspect { margin-top: auto; color: #d5deea; }
+.nozzle-method { margin-top: 8px; }
+.nozzle-dialog { width: min(1200px, 96vw); max-height: 94vh; margin: auto; padding: 18px; border: 1px solid #0f3460; border-radius: 10px; background: #1a1a2e; color: #e0e0e0; }
+.nozzle-dialog::backdrop { background: rgba(0, 0, 0, .8); }
+.nozzle-dialog-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
+.nozzle-dialog h2 { margin-right: auto; font-size: 17px; }
+.nozzle-dialog button, .nozzle-dialog select { padding: 8px 12px; font-size: 12px; }
+.nozzle-dialog label { font-size: 12px; }
+.nozzle-inspection { overflow: auto; height: min(65vh, 800px); margin-top: 12px; background: #ddd; border-radius: 4px; }
+.nozzle-inspection img { display: block; max-width: none; margin: auto; image-rendering: pixelated; }
+.nozzle-inspection.fit img { width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 1100px) { .nozzle-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+  .nozzle-check { padding: 14px; }
+  .nozzle-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .nozzle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 380px) { .nozzle-grid { grid-template-columns: 1fr; } }
 
 .empty-state {
   display: flex; align-items: center; justify-content: center;
@@ -171,12 +237,13 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
 <div class="toolbar">
   <h1>Stamp Extractor</h1>
   <label for="file-input" id="file-label">Choose File</label>
-  <input type="file" id="file-input" accept="image/*,.eps,.ps,.ai,.svg">
+  <input type="file" id="file-input" accept="image/*,.eps,.ps,.ai,.svg,.heif,.heic,.hif,.heifs,.heics">
   <button id="btn-rect" class="active" onclick="setTool('rect')">Rectangle</button>
   <button id="btn-circle" onclick="setTool('circle')">Circle</button>
   <button id="btn-selectall" onclick="selectAll()">Select All</button>
+  <button id="btn-delete-selection" onclick="deleteSelection(currentIdx)" disabled>Delete selection</button>
   <div class="spacer"></div>
-  <span class="hint" id="status-hint">Load an image to begin</span>
+  <span class="hint" id="status-hint">Load an image to begin — HEIF / HEIC supported</span>
 </div>
 
 <div class="canvas-wrap" id="canvas-wrap">
@@ -197,8 +264,8 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
           <button data-extraction-action onclick="openEraser()">Paint / Erase</button>
           <button data-extraction-action onclick="invertExtraction()">Invert</button>
           <button data-extraction-action onclick="fillHoles()">Fill Holes</button>
-          <button data-extraction-action onclick="downloadSvg()">Download SVG</button>
-          <div class="control-group">
+          <button data-extraction-action onclick="downloadSvg()" title="Download original artwork; stamp preservation and reinforcement are not applied.">Download SVG</button>
+          <div class="control-group control-wide">
             <div class="control-heading">
               <label for="fuzzing">Fuzzing</label>
               <output id="fuzz-value" for="fuzzing">0</output>
@@ -208,7 +275,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
             <div class="range-labels" aria-hidden="true"><span>Off</span><span>Strong</span></div>
             <p class="control-help" id="fuzz-help">Simplifies fine detail locally when released. No AI. Set to 0 to restore the original; adjustments never accumulate.</p>
           </div>
-          <div class="control-group">
+          <div class="control-group control-wide">
             <label for="stamp-mode">Stamp face</label>
             <select id="stamp-mode" aria-describedby="stamp-mode-help" onchange="invalidateStamp(); updateGallery()">
               <option value="raised">Raised (recessed clay)</option>
@@ -216,18 +283,64 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
             </select>
             <p class="control-help" id="stamp-mode-help">Raised features recess the clay. A concave stamp's surrounding face presses the clay, leaving a raised pattern and a border.</p>
           </div>
-          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc">
-            <span>Size</span> <span id="size-label">36mm</span>
-            <input type="range" id="stamp-size" min="12" max="80" value="36" step="1"
-              style="width:80px;vertical-align:middle"
-              oninput="document.getElementById('size-label').textContent=this.value+'mm'; invalidateStamp(); updateGallery()">
+          <div class="control-group">
+            <label for="body-shape">Body shape</label>
+            <select id="body-shape" aria-describedby="dimensions-help" onchange="changeBodyShape()">
+              <option value="auto">Auto (artwork ratio)</option>
+              <option value="rectangular">Rectangular</option>
+              <option value="round">Round</option>
+            </select>
+          </div>
+          <button class="size-preset" onclick="applyStampPreset()" title="Optional signature preset: 65 mm long, 15 mm across, 20 mm tall">Use 65 × 15 × 20 mm</button>
+          <div class="dimensions control-wide">
+            <div class="control-group">
+              <label id="width-label" for="stamp-width">Width (mm)</label>
+              <input type="number" id="stamp-width" min="12" max="200" step="any" value="36"
+                aria-describedby="dimensions-help dimension-error" oninput="changeDimensions()">
+            </div>
+            <div class="control-group">
+              <label for="stamp-height">Height (mm)</label>
+              <input type="number" id="stamp-height" min="12" max="200" step="any" readonly
+                aria-describedby="height-help dimension-error" oninput="changeDimensions()">
+            </div>
+            <div class="control-group">
+              <label for="total-height">Overall height (mm)</label>
+              <input type="number" id="total-height" min="8" max="60" step="any" value="22"
+                aria-describedby="dimensions-help dimension-error" oninput="changeDimensions()">
+            </div>
+          </div>
+          <p class="control-help control-wide" id="height-help">Auto height follows the artwork's on-screen ratio with a 1.5 mm margin on each side.</p>
+          <p class="control-help control-wide" id="dimensions-help">Exact outside dimensions: width is the artwork's horizontal extent, height its vertical extent, both matching the preview. A portrait artwork therefore yields a taller-than-wide stamp. Artwork fits without stretching and is mirrored automatically for both faces. Body shape is independent of raised / concave.</p>
+          <p class="control-help control-wide dimension-error" id="dimension-error" role="status" aria-live="polite"></p>
+          <label class="thin-lines-label control-wide">
+            <input type="checkbox" id="preserve-thin-strokes" aria-describedby="stroke-treatment-help" onchange="changeStrokeTreatment('preserve')">
+            Preserve thin strokes
           </label>
-          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc;cursor:pointer"
-            title="Thicken thin features so they survive the slicer. Use for sources with fine lines, hatching, or delicate detail.">
-            <input type="checkbox" id="thin-lines" onchange="invalidateStamp(); updateGallery()">
-            Thin lines
+          <div class="control-group">
+            <label for="target-nozzle">Target nozzle (width preset)</label>
+            <select id="target-nozzle" disabled aria-describedby="stroke-preset-help" onchange="changeStrokeNozzle()">
+              <option value="0.24">0.2 mm nozzle → 0.24 mm</option>
+              <option value="0.46">0.4 mm nozzle → 0.46 mm</option>
+              <option value="0.68">0.6 mm nozzle → 0.68 mm</option>
+              <option value="0.90">0.8 mm nozzle → 0.90 mm</option>
+              <option value="" disabled>Custom minimum</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="min-stroke-mm">Minimum stroke (mm)</label>
+            <input type="number" id="min-stroke-mm" min="0.15" max="1.2" step="any" value="0.24" disabled
+              aria-describedby="stroke-treatment-help stroke-error" oninput="changeMinimumStroke()">
+          </div>
+          <p class="control-help control-wide" id="stroke-preset-help">The target nozzle only fills in a minimum width; it does not select a Bambu profile. Settings apply to all selections.</p>
+          <label class="thin-lines-label control-wide">
+            <input type="checkbox" id="thin-lines" aria-describedby="stroke-treatment-help" onchange="changeStrokeTreatment('reinforce')">
+            Reinforce thin lines
           </label>
+          <p class="control-help control-wide" id="stroke-treatment-help">Preserve selectively widens thin strokes at the current physical size, protecting gaps where possible. Reinforce uniformly expands features instead. Choose one or neither; switching off restores untreated geometry. Tight gaps can prevent the requested width—compare to inspect conflicts. Neither guarantees printability.</p>
+          <p class="control-help control-wide dimension-error" id="stroke-error" role="status" aria-live="polite"></p>
           <button class="primary" id="btn-3mf" onclick="generateStamp()">Generate .3mf</button>
+          <p class="control-help control-wide">Artwork above and Download SVG stay original. Preservation / reinforcement apply only to the .3mf and nozzle comparison; mirroring is applied to the exported stamp.</p>
+          <p class="control-help control-wide dimension-summary" id="dimension-summary" role="status" aria-live="polite"></p>
         </div>
         <div class="info" id="preview-info" role="status" aria-live="polite"></div>
       </div>
@@ -236,7 +349,51 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
   </div>
   <div class="empty-state" id="empty-state">Draw selections on the image to extract stamp patterns</div>
   <div class="thumbstrip" id="thumbstrip"></div>
+  <section class="nozzle-check" id="nozzle-check" aria-labelledby="nozzle-title" hidden>
+    <div class="nozzle-header">
+      <div>
+        <p class="nozzle-eyebrow">Physical-scale estimate</p>
+        <h2 id="nozzle-title">Nozzle detail check</h2>
+        <p class="nozzle-copy">Compare your intended pattern with four standard nozzles, at the current stamp size. Approximate top-face detail in normal clay-reading orientation, not a mirrored stamp face or a sliced toolpath.</p>
+      </div>
+      <button class="compare-button" id="btn-compare-nozzles" onclick="compareNozzles()" aria-describedby="nozzle-status">Compare nozzles</button>
+    </div>
+    <p class="nozzle-status" id="nozzle-status" role="status" aria-live="polite">Run a comparison when your size and artwork are ready.</p>
+    <div id="nozzle-results" hidden>
+      <p class="nozzle-summary" id="nozzle-summary"></p>
+      <p class="preservation-report" id="preservation-report" role="status" hidden></p>
+      <ul class="nozzle-legend" aria-label="Detail comparison colors">
+        <li><span class="nozzle-swatch" aria-hidden="true"></span>Retained pattern</li>
+        <li><span class="nozzle-swatch lost" aria-hidden="true"></span>Lost pattern</li>
+        <li><span class="nozzle-swatch extra" aria-hidden="true"></span>Extra / unwanted pattern</li>
+      </ul>
+      <div class="nozzle-grid" id="nozzle-grid"></div>
+      <p class="nozzle-copy" id="nozzle-loss-caption">Lost and extra percentages are relative to the intended pattern area, not the whole body. White is the body; light gray is outside. Select any card to inspect at full resolution.</p>
+      <p class="nozzle-copy nozzle-method" id="nozzle-disclaimer"></p>
+    </div>
+    <p class="nozzle-copy nozzle-method">A conservative planar feature / gap estimate, not a slicer simulation: no toolpaths, height, filament, clay pressure, or variable-line-width modeling. Nominal line width is 1.05 × nozzle diameter; actual slicer widths may differ.</p>
+    <p class="nozzle-copy nozzle-method">Comparison uses the same preservation / reinforcement settings as the .3mf; it never changes the source artwork or Download SVG. Target nozzle is only a width preset, not a printer-profile selection. The exported Bambu profile remains 0.4 mm-oriented: choose your actual nozzle and matching line settings in Bambu Studio, then re-slice.</p>
+  </section>
 </div>
+
+<dialog class="nozzle-dialog" id="nozzle-dialog" aria-labelledby="nozzle-dialog-title" aria-describedby="nozzle-dialog-detail">
+  <div class="nozzle-dialog-header">
+    <h2 id="nozzle-dialog-title">Inspect pattern</h2>
+    <label for="nozzle-zoom">Zoom</label>
+    <select id="nozzle-zoom" onchange="setNozzleZoom()">
+      <option value="fit">Fit</option>
+      <option value="1">100% · full resolution</option>
+      <option value="2">200%</option>
+      <option value="4">400%</option>
+    </select>
+    <button autofocus onclick="document.getElementById('nozzle-dialog').close()">Close</button>
+  </div>
+  <p class="nozzle-copy" id="nozzle-dialog-detail"></p>
+  <p class="nozzle-copy">Red: lost pattern · Amber: extra pattern · Black: retained. Scroll to inspect when zoomed; press Escape to close. Screen size is not physical print size.</p>
+  <div class="nozzle-inspection fit" id="nozzle-inspection" tabindex="0" aria-label="Scrollable detail image">
+    <img id="nozzle-inspection-image" alt="">
+  </div>
+</dialog>
 
 <div class="eraser-overlay" id="eraser-overlay">
   <div class="eraser-toolbar">
@@ -263,9 +420,10 @@ const results = []; // Stable result objects retain fuzzing and stamp jobs acros
 let currentIdx = -1;
 let tool = 'rect';
 let settingsRevision = 0, viewRevision = 0;
+let nozzleComparison = null;
 
 function extractionUpdating(r) {
-  return r && (r.processing || r.simplifying || r.editing || r.desiredFuzz !== r.fuzz);
+  return r && (r.transforming || r.processing || r.simplifying || r.editing || r.desiredFuzz !== r.fuzz);
 }
 
 function extractionBusy(r) {
@@ -275,6 +433,7 @@ function extractionBusy(r) {
 function invalidateResult(r) {
   r.revision = (r.revision || 0) + 1;
   r.stampJob = null;
+  if (nozzleComparison && nozzleComparison.result === r) clearNozzleComparison();
 }
 
 function selectResult(idx) {
@@ -295,6 +454,33 @@ let panning = false, panStart = null, panStartX = 0, panStartY = 0;
 
 // Move state
 let moving = false, movingIdx = -1, moveOffsetX = 0, moveOffsetY = 0;
+let moveOriginal = null;
+let resizing = null;
+const resizeHandles = [
+  ['nw', 0, 0], ['n', .5, 0], ['ne', 1, 0], ['e', 1, .5],
+  ['se', 1, 1], ['s', .5, 1], ['sw', 0, 1], ['w', 0, .5],
+];
+
+function hitTestHandle(pt) {
+  const sel = selections[currentIdx];
+  if (!sel) return null;
+  return resizeHandles.find(([, x, y]) =>
+    Math.abs(pt.x - sel.x - x * sel.w) <= 7 / zoom &&
+    Math.abs(pt.y - sel.y - y * sel.h) <= 7 / zoom);
+}
+
+function deleteSelection(idx) {
+  const r = results[idx];
+  if (!r || moving || resizing || dragging) return;
+  if (eraserResult === r) closeEraser();
+  invalidateResult(r);
+  viewRevision++;
+  selections.splice(idx, 1);
+  results.splice(idx, 1);
+  if (idx < currentIdx) currentIdx--;
+  else if (idx === currentIdx) currentIdx = Math.min(idx, results.length - 1);
+  updateGallery();
+}
 
 // Selection overlays stored for redraw
 const selections = []; // {x, y, w, h, shape, color}
@@ -371,7 +557,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     fitImage();
     draw();
     document.getElementById('status-hint').textContent =
-      `${imgW}×${imgH} — draw selections to extract`;
+      `${imgW}×${imgH} — drag inside to move; drag handles to resize; select a box to delete`;
     document.getElementById('file-label').textContent = file.name;
   };
   img.onerror = () => {
@@ -385,6 +571,8 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   selections.length = 0;
   results.length = 0;
   currentIdx = -1;
+  dragging = moving = panning = false;
+  resizing = null;
   updateGallery();
 });
 
@@ -442,6 +630,24 @@ function draw() {
     ctx.fillText(i + 1, sel.x + 3 / zoom, sel.y - 4 / zoom);
   });
 
+  const active = selections[currentIdx];
+  if (active) {
+    ctx.strokeStyle = active.color;
+    ctx.lineWidth = 1 / zoom;
+    if (active.shape === 'circle') {
+      ctx.setLineDash([3 / zoom, 3 / zoom]);
+      ctx.strokeRect(active.x, active.y, active.w, active.h);
+      ctx.setLineDash([]);
+    }
+    for (const [, x, y] of resizeHandles) {
+      ctx.fillStyle = '#fff';
+      const hx = active.x + x * active.w - 4 / zoom;
+      const hy = active.y + y * active.h - 4 / zoom;
+      ctx.fillRect(hx, hy, 8 / zoom, 8 / zoom);
+      ctx.strokeRect(hx, hy, 8 / zoom, 8 / zoom);
+    }
+  }
+
   // Draw current drag (new selection)
   if (dragging && dragStart && dragEnd) {
     const x = Math.min(dragStart.x, dragEnd.x);
@@ -488,14 +694,27 @@ canvas.addEventListener('mousedown', (e) => {
 
   const pt = screenToImage(e.offsetX, e.offsetY);
 
+  const handle = hitTestHandle(pt);
+  if (handle) {
+    const r = results[currentIdx];
+    if (extractionUpdating(r)) return;
+    resizing = { idx: currentIdx, handle: handle[0], original: { ...selections[currentIdx] } };
+    r.transforming = true;
+    invalidateResult(r);
+    updateGallery();
+    e.preventDefault();
+    return;
+  }
   // Check if clicking on an existing selection → move it
   const hitIdx = hitTestSelection(pt.x, pt.y);
   if (hitIdx >= 0) {
+    selectResult(hitIdx);
     if (extractionUpdating(results[hitIdx])) return;
-    invalidateResult(results[hitIdx]);
+    results[hitIdx].transforming = true;
     updateStampButton();
     moving = true;
     movingIdx = hitIdx;
+    moveOriginal = { x: selections[hitIdx].x, y: selections[hitIdx].y };
     moveOffsetX = pt.x - selections[hitIdx].x;
     moveOffsetY = pt.y - selections[hitIdx].y;
     canvas.style.cursor = 'grabbing';
@@ -509,46 +728,70 @@ canvas.addEventListener('mousedown', (e) => {
   dragEnd = pt;
 });
 
-canvas.addEventListener('mousemove', (e) => {
+window.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
   if (panning) {
-    panX = panStartX + (e.offsetX - panStart.x);
-    panY = panStartY + (e.offsetY - panStart.y);
+    panX = panStartX + (sx - panStart.x);
+    panY = panStartY + (sy - panStart.y);
+    draw();
+    return;
+  }
+  if (resizing) {
+    const pt = screenToImage(sx, sy);
+    const { idx, handle, original: s } = resizing;
+    let left = s.x, top = s.y, right = s.x + s.w, bottom = s.y + s.h;
+    if (handle.includes('w')) left = Math.max(0, Math.min(right - 5, Math.round(pt.x)));
+    if (handle.includes('e')) right = Math.min(imgW, Math.max(left + 5, Math.round(pt.x)));
+    if (handle.includes('n')) top = Math.max(0, Math.min(bottom - 5, Math.round(pt.y)));
+    if (handle.includes('s')) bottom = Math.min(imgH, Math.max(top + 5, Math.round(pt.y)));
+    Object.assign(selections[idx], { x: left, y: top, w: right - left, h: bottom - top });
     draw();
     return;
   }
   if (moving) {
-    const pt = screenToImage(e.offsetX, e.offsetY);
+    const pt = screenToImage(sx, sy);
     const sel = selections[movingIdx];
-    sel.x = Math.round(pt.x - moveOffsetX);
-    sel.y = Math.round(pt.y - moveOffsetY);
+    sel.x = Math.max(0, Math.min(imgW - sel.w, Math.round(pt.x - moveOffsetX)));
+    sel.y = Math.max(0, Math.min(imgH - sel.h, Math.round(pt.y - moveOffsetY)));
     draw();
     return;
   }
   if (dragging) {
-    dragEnd = screenToImage(e.offsetX, e.offsetY);
+    dragEnd = screenToImage(sx, sy);
     draw();
     return;
   }
 
   // Cursor hint: show grab when hovering over a selection
   if (img) {
-    const pt = screenToImage(e.offsetX, e.offsetY);
-    canvas.style.cursor = hitTestSelection(pt.x, pt.y) >= 0 ? 'grab' : 'crosshair';
+    const pt = screenToImage(sx, sy);
+    const handle = hitTestHandle(pt);
+    canvas.style.cursor = handle ? `${handle[0]}-resize` : hitTestSelection(pt.x, pt.y) >= 0 ? 'grab' : 'crosshair';
   }
 });
 
-canvas.addEventListener('mouseup', (e) => {
+window.addEventListener('mouseup', (e) => {
   if (panning) { panning = false; return; }
+  if (resizing) {
+    const idx = resizing.idx;
+    resizing = null;
+    results[idx].transforming = false;
+    canvas.style.cursor = 'crosshair';
+    reExtract(idx);
+    return;
+  }
 
   // Finish moving
   if (moving) {
     const idx = movingIdx;
     moving = false;
     movingIdx = -1;
+    results[idx].transforming = false;
     canvas.style.cursor = 'crosshair';
-    draw();
-    // Re-extract at new position
-    reExtract(idx);
+    // A click only selects; preserve edits and exports unless the box moved.
+    if (selections[idx].x !== moveOriginal.x || selections[idx].y !== moveOriginal.y) reExtract(idx);
+    else updateGallery();
     return;
   }
 
@@ -575,16 +818,7 @@ canvas.addEventListener('contextmenu', (e) => {
   if (!img) return;
   const pt = screenToImage(e.offsetX, e.offsetY);
   const hitIdx = hitTestSelection(pt.x, pt.y);
-  if (hitIdx >= 0) {
-    if (extractionUpdating(results[hitIdx])) return;
-    invalidateResult(results[hitIdx]);
-    viewRevision++;
-    selections.splice(hitIdx, 1);
-    results.splice(hitIdx, 1);
-    if (currentIdx >= results.length) currentIdx = results.length - 1;
-    draw();
-    updateGallery();
-  }
+  if (hitIdx >= 0) deleteSelection(hitIdx);
 });
 
 // Zoom with scroll wheel
@@ -605,7 +839,7 @@ async function extractRegion(sel, num) {
   const r = { id: null, svg: null, name: `${baseName}-extract-${num}`,
     processing: true, fuzz: 0, desiredFuzz: 0, revision: 0 };
   results.push(r);
-  if (currentIdx === -1) selectResult(results.indexOf(r));
+  selectResult(results.indexOf(r));
   await requestExtraction(r, sel);
 }
 
@@ -648,33 +882,100 @@ async function reExtract(selIdx, fill = false) {
   await requestExtraction(r, sel, fill);
 }
 
-// ── Thin-lines preview: add stroke to SVG paths to visualize thickening ──
-function applyThinLinesPreview(svgEl) {
-  const thinLines = document.getElementById('thin-lines').checked;
-  const paths = svgEl.querySelectorAll('path');
-  if (!thinLines) {
-    paths.forEach(p => { p.removeAttribute('stroke'); p.removeAttribute('stroke-width'); p.removeAttribute('stroke-linejoin'); });
-    return;
+// ── Overall dimensions: preserve editable drafts, derive only read-only height ──
+let previousBodyShape = 'auto';
+let rectangularHeight = '36';
+
+function artworkRatio(r) {
+  if (!r || !r.svg) return null;
+  if (r.ratioSvg === r.svg) return r.aspectRatio;
+  const svg = new DOMParser().parseFromString(r.svg, 'image/svg+xml').documentElement;
+  const box = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  const width = box.length === 4 ? box[2] : parseFloat(svg.getAttribute('width'));
+  const height = box.length === 4 ? box[3] : parseFloat(svg.getAttribute('height'));
+  r.ratioSvg = r.svg;
+  r.aspectRatio = width > 0 && height > 0 && Number.isFinite(width / height) ? width / height : null;
+  return r.aspectRatio;
+}
+
+function displayMm(value) {
+  return Number(value.toFixed(3)).toString();
+}
+
+function stampDimensions(r) {
+  const settings = stampSettings();
+  const ratio = artworkRatio(r);
+  let height = settings.height_mm;
+  if (settings.body_shape === 'round') height = settings.width_mm;
+  if (settings.body_shape === 'auto') {
+    height = ratio ? Math.max(12, (settings.width_mm - 3) / ratio + 3) : NaN;
   }
-  // Read native SVG width (potrace outputs in pt, viewBox matches)
-  const rawW = parseFloat(svgEl.getAttribute('width')) || 800;
-  const stampSize = parseFloat(document.getElementById('stamp-size').value) || 36;
-  // Match png2stamp.sh auto formula: 0.30*(1 - size/36), min 0
-  const thickenMm = Math.max(0, 0.30 * (1 - stampSize / 36));
-  // At 36mm+ thickening is 0 — show a minimum preview so checkbox is visibly responsive
-  const previewMm = Math.max(thickenMm, 0.15);
-  // Convert thicken from stamp-mm to SVG coordinate units.
-  // stroke-width extends W/2 outward, offset extends delta outward, so W = 2*delta
-  const strokeW = 2 * previewMm * rawW / stampSize;
-  paths.forEach(p => {
-    p.setAttribute('stroke', 'black');
-    p.setAttribute('stroke-width', strokeW);
-    p.setAttribute('stroke-linejoin', 'round');
-  });
+  let error = '';
+  if (!Number.isFinite(settings.width_mm) || settings.width_mm < 12 || settings.width_mm > 200) {
+    error = `${settings.body_shape === 'round' ? 'Diameter' : 'Width'} must be between 12 and 200 mm.`;
+  } else if (!Number.isFinite(settings.total_height_mm) || settings.total_height_mm < 8 || settings.total_height_mm > 60) {
+    error = 'Overall height must be between 8 and 60 mm, including grip and relief.';
+  } else if (settings.body_shape === 'auto' && !ratio) {
+    error = 'An artwork preview is needed to calculate auto height.';
+  } else if (!Number.isFinite(height) || height < 12 || height > 200) {
+    error = settings.body_shape === 'auto'
+      ? 'Auto height exceeds 200 mm. Reduce width or choose rectangular to fit the artwork.'
+      : 'Height must be between 12 and 200 mm.';
+  }
+  return { ...settings, height_mm: height, error };
+}
+
+function updateDimensionControls(r) {
+  const dimensions = stampDimensions(r);
+  const shape = dimensions.body_shape;
+  const height = document.getElementById('stamp-height');
+  height.readOnly = shape !== 'rectangular';
+  if (height.readOnly) height.value = Number.isFinite(dimensions.height_mm) ? displayMm(dimensions.height_mm) : '';
+  document.getElementById('width-label').textContent = shape === 'round' ? 'Diameter (mm)' : 'Width (mm)';
+  document.getElementById('height-help').textContent = shape === 'auto'
+    ? "Auto height follows the artwork's on-screen ratio with a 1.5 mm margin on each side (minimum 12 mm)."
+    : shape === 'round' ? 'Round height equals the diameter. Artwork fits inside the circle without stretching.'
+    : 'Width and height set the rectangular body. Artwork fits within the margins without stretching.';
+  document.getElementById('dimension-error').textContent = dimensions.error;
+  for (const id of ['stamp-width', 'stamp-height', 'total-height']) {
+    const input = document.getElementById(id);
+    const value = input.valueAsNumber;
+    input.setAttribute('aria-invalid', !Number.isFinite(value) || value < Number(input.min) || value > Number(input.max));
+  }
+  const job = r && r.stampJob;
+  const accepted = job && jobIsCurrent(r, job) && job.dimensions;
+  document.getElementById('dimension-summary').textContent = accepted
+    ? `Export dimensions: ${displayMm(accepted.width_mm)} wide × ${displayMm(accepted.height_mm)} tall × ${displayMm(accepted.total_height_mm)} mm high.`
+    : dimensions.error ? '' : `${shape === 'auto' ? 'Estimated body' : 'Body'}: ${displayMm(dimensions.width_mm)} wide × ${displayMm(dimensions.height_mm)} tall × ${displayMm(dimensions.total_height_mm)} mm high.`;
+  return dimensions;
+}
+
+function changeDimensions() {
+  invalidateStamp();
+  updateGallery();
+}
+
+function changeBodyShape() {
+  const shape = document.getElementById('body-shape').value;
+  const height = document.getElementById('stamp-height');
+  if (previousBodyShape === 'rectangular') rectangularHeight = height.value;
+  if (shape === 'rectangular') height.value = rectangularHeight;
+  previousBodyShape = shape;
+  changeDimensions();
+}
+
+function applyStampPreset() {
+  document.getElementById('body-shape').value = previousBodyShape = 'rectangular';
+  document.getElementById('stamp-width').value = '65';
+  document.getElementById('stamp-height').value = rectangularHeight = '15';
+  document.getElementById('total-height').value = '20';
+  changeDimensions();
 }
 
 // ── Gallery ──
 function updateGallery() {
+  document.getElementById('btn-delete-selection').disabled = currentIdx < 0 || moving || !!resizing || dragging;
+  draw();
   const countEl = document.getElementById('gallery-count');
   const emptyEl = document.getElementById('empty-state');
   const previewRow = document.getElementById('preview-row');
@@ -687,6 +988,7 @@ function updateGallery() {
     emptyEl.style.display = 'flex';
     previewRow.style.display = 'none';
     strip.innerHTML = '';
+    updateStampButton();
     return;
   }
 
@@ -702,7 +1004,6 @@ function updateGallery() {
     display.innerHTML = r.svg;
     const svgEl = display.querySelector('svg');
     if (svgEl) {
-      applyThinLinesPreview(svgEl);  // before removing width (needs native size)
       svgEl.removeAttribute('width');
       svgEl.removeAttribute('height');
       svgEl.style.maxWidth = '320px';
@@ -730,7 +1031,6 @@ function updateGallery() {
       t.innerHTML = r.svg;
       const svgEl = t.querySelector('svg');
       if (svgEl) {
-        applyThinLinesPreview(svgEl);
         svgEl.removeAttribute('width');
         svgEl.removeAttribute('height');
         svgEl.style.maxWidth = '40px';
@@ -857,17 +1157,67 @@ async function fillHoles() {
   await reExtract(currentIdx, true);
 }
 
+// ── Reversible physical-scale stroke treatment, shared across selections ──
+function preservationError() {
+  if (!document.getElementById('preserve-thin-strokes').checked) return '';
+  const width = document.getElementById('min-stroke-mm').valueAsNumber;
+  return !Number.isFinite(width) || width < 0.15 || width > 1.2
+    ? 'Minimum stroke must be between 0.15 and 1.2 mm.' : '';
+}
+
+function updateStrokeControls() {
+  const enabled = document.getElementById('preserve-thin-strokes').checked;
+  const input = document.getElementById('min-stroke-mm');
+  input.disabled = !enabled;
+  document.getElementById('target-nozzle').disabled = !enabled;
+  const error = preservationError();
+  input.setAttribute('aria-invalid', Boolean(error));
+  document.getElementById('stroke-error').textContent = error;
+  return error;
+}
+
+function changeStrokeTreatment(source) {
+  const preserve = document.getElementById('preserve-thin-strokes');
+  const reinforce = document.getElementById('thin-lines');
+  if (source === 'preserve' && preserve.checked) reinforce.checked = false;
+  if (source === 'reinforce' && reinforce.checked) preserve.checked = false;
+  invalidateStamp();
+  updateGallery();
+}
+
+function changeStrokeNozzle() {
+  document.getElementById('min-stroke-mm').value = document.getElementById('target-nozzle').value;
+  invalidateStamp();
+  updateGallery();
+}
+
+function changeMinimumStroke() {
+  const input = document.getElementById('min-stroke-mm');
+  const nozzle = document.getElementById('target-nozzle');
+  const preset = Array.from(nozzle.options).find(option => option.value && Number(option.value) === input.valueAsNumber);
+  nozzle.value = preset ? preset.value : '';
+  invalidateStamp();
+  updateGallery();
+}
+
 // ── Generate .3mf (non-blocking) ──
 function stampSettings() {
   return {
-    size_mm: document.getElementById('stamp-size').value,
+    body_shape: document.getElementById('body-shape').value,
+    width_mm: document.getElementById('stamp-width').valueAsNumber,
+    height_mm: document.getElementById('body-shape').value === 'rectangular'
+      ? document.getElementById('stamp-height').valueAsNumber : null,
+    total_height_mm: document.getElementById('total-height').valueAsNumber,
     thin_lines: document.getElementById('thin-lines').checked,
+    preserve_thin_strokes: document.getElementById('preserve-thin-strokes').checked,
+    min_stroke_mm: document.getElementById('preserve-thin-strokes').checked
+      ? document.getElementById('min-stroke-mm').valueAsNumber : 0.24,
     mode: document.getElementById('stamp-mode').value,
   };
 }
 
 function stampKey(r) {
-  return JSON.stringify([r.id, r.revision, settingsRevision, stampSettings()]);
+  return JSON.stringify([r.id, r.revision, settingsRevision, stampSettings(), stampDimensions(r).height_mm]);
 }
 
 function jobIsCurrent(r, job) {
@@ -876,7 +1226,7 @@ function jobIsCurrent(r, job) {
 
 async function generateStamp() {
   const r = results[currentIdx];
-  if (extractionBusy(r)) return;
+  if (extractionBusy(r) || stampDimensions(r).error || preservationError()) return;
   if (r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running') return;
   // Reserve before the POST: even a settings change while it is pending invalidates it.
   const job = { key: stampKey(r), view: viewRevision, status: 'running', jobId: null };
@@ -892,6 +1242,8 @@ async function generateStamp() {
     if (!jobIsCurrent(r, job)) return;
     if (!res.ok || data.error) throw new Error(data.error || 'Stamp generation failed');
     job.jobId = data.job_id;
+    job.dimensions = data.dimensions;
+    updateStampButton();
     await pollStampJob(r, job);
   } catch (err) {
     if (!jobIsCurrent(r, job)) return;
@@ -951,20 +1303,217 @@ function updateStampButton() {
   const r = results[currentIdx];
   const job = r && r.stampJob;
   btn.onclick = generateStamp;
-  btn.disabled = extractionBusy(r);
+  const dimensions = updateDimensionControls(r);
+  const strokeError = updateStrokeControls();
+  btn.title = document.getElementById('preserve-thin-strokes').checked
+    ? 'Export .3mf with selective thin-stroke preservation; Download SVG stays original.'
+    : document.getElementById('thin-lines').checked
+      ? 'Export .3mf with uniform thin-line reinforcement; Download SVG stays original.'
+      : 'Export .3mf without stroke preservation or reinforcement.';
+  updateNozzlePreview(r, dimensions);
+  btn.disabled = extractionBusy(r) || Boolean(dimensions.error || strokeError);
   if (job && jobIsCurrent(r, job) && job.status === 'running') {
     btn.innerHTML = '<span class="stamp-spinner"></span>Generating...';
     btn.disabled = true;
   } else if (job && jobIsCurrent(r, job) && job.status === 'done') {
     btn.textContent = 'Download .3mf';
     btn.onclick = () => {
-      if (results[currentIdx] === r && jobIsCurrent(r, job) && !extractionBusy(r)) {
+      if (results[currentIdx] === r && jobIsCurrent(r, job) && !extractionBusy(r) && !stampDimensions(r).error && !preservationError()) {
         triggerDownload(`/stamp/download/${job.jobId}`, r.name + '.3mf');
       }
     };
   } else {
     btn.textContent = 'Generate .3mf';
   }
+}
+
+// ── Opt-in nozzle comparison; owns no artwork or export job state ──
+function clearNozzleComparison() {
+  if (nozzleComparison) nozzleComparison.controller.abort();
+  nozzleComparison = null;
+  document.getElementById('nozzle-results').hidden = true;
+  document.getElementById('nozzle-grid').replaceChildren();
+  document.getElementById('preservation-report').hidden = true;
+  const dialog = document.getElementById('nozzle-dialog');
+  if (dialog.open) dialog.close();
+  document.getElementById('nozzle-inspection-image').removeAttribute('src');
+}
+
+function nozzleRequestIsCurrent(request) {
+  return nozzleComparison === request && results[currentIdx] === request.result &&
+    results.includes(request.result) && request.view === viewRevision &&
+    !extractionBusy(request.result) && request.key === stampKey(request.result);
+}
+
+function updateNozzlePreview(r, dimensions = stampDimensions(r)) {
+  if (nozzleComparison && !nozzleRequestIsCurrent(nozzleComparison)) clearNozzleComparison();
+  document.getElementById('nozzle-check').hidden = !r;
+  const request = nozzleComparison;
+  const loading = request && request.status === 'loading';
+  const generating = r && r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running';
+  const button = document.getElementById('btn-compare-nozzles');
+  button.disabled = extractionBusy(r) || Boolean(dimensions.error || preservationError()) || Boolean(loading || generating);
+  button.textContent = loading ? 'Comparing…' : 'Compare nozzles';
+  document.getElementById('nozzle-results').hidden = !request || !request.data;
+  document.getElementById('nozzle-check').setAttribute('aria-busy', Boolean(loading));
+  const status = document.getElementById('nozzle-status');
+  status.classList.toggle('error', Boolean(request && request.error));
+  status.textContent = loading ? 'Estimating physical-scale detail for all four nozzles…' :
+    request && request.error ? request.error :
+    extractionBusy(r) ? 'Finish processing or editing the artwork before comparing.' :
+    dimensions.error ? 'Enter valid physical dimensions before comparing.' :
+    preservationError() ? 'Enter a valid minimum stroke width before comparing.' :
+    generating ? 'Wait for the current stamp export to finish before comparing.' :
+    request && request.data ? 'Comparison matches the current artwork and settings. Select a card to inspect.' :
+    'Ready for a fresh comparison. Changes to artwork, size, face, preservation, minimum stroke width, reinforcement, or selection require Compare nozzles again.';
+}
+
+async function compareNozzles() {
+  const r = results[currentIdx];
+  if (extractionBusy(r) || stampDimensions(r).error || preservationError() ||
+      (nozzleComparison && nozzleComparison.status === 'loading') ||
+      (r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running')) return;
+  clearNozzleComparison();
+  const request = {
+    result: r, key: stampKey(r), view: viewRevision, settings: stampSettings(),
+    controller: new AbortController(), status: 'loading', data: null, error: null,
+  };
+  nozzleComparison = request;
+  updateNozzlePreview(r);
+  try {
+    const response = await fetch('/print-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: request.controller.signal,
+      body: JSON.stringify({ extraction_id: r.id, ...request.settings }),
+    });
+    const data = await response.json();
+    if (!nozzleRequestIsCurrent(request)) return;
+    if (!response.ok || data.error) throw new Error(data.error || 'Detail comparison failed');
+    request.data = data;
+    request.status = 'done';
+    renderNozzleComparison(request);
+  } catch (err) {
+    if (!nozzleRequestIsCurrent(request)) return;
+    request.data = null;
+    request.status = 'error';
+    request.error = 'Could not compare nozzles: ' + err.message + '. Artwork and exports are unchanged; try again.';
+  } finally {
+    if (nozzleRequestIsCurrent(request)) updateNozzlePreview(r);
+  }
+}
+
+function nozzlePercent(value) {
+  return value > 0 && value < 0.01 ? '<0.01%' : `${value.toFixed(2)}%`;
+}
+
+function renderNozzleComparison(request) {
+  const data = request.data;
+  const dimensions = data.dimensions;
+  const face = data.mode === 'concave' ? 'Concave face / raised clay' : 'Raised face / recessed clay';
+  const preservation = data.preservation;
+  const intended = preservation ? 'strengthened intended pattern' : 'intended pattern';
+  const treatment = preservation ? `Preserve thin strokes · ${displayMm(preservation.min_stroke_mm)} mm target`
+    : request.settings.thin_lines ? 'Uniform reinforcement' : 'No stroke treatment';
+  const preservationMetrics = preservation
+    ? `Added area ${nozzlePercent(preservation.added_percent)} of original artwork · Gap / edge conflicts ${nozzlePercent(preservation.conflict_percent)} of thin-stroke samples`
+    : '';
+  document.getElementById('nozzle-summary').textContent =
+    `${displayMm(dimensions.width_mm)} × ${displayMm(dimensions.height_mm)} × ${displayMm(dimensions.total_height_mm)} mm body · ${face} · ${treatment} · ${displayMm(data.sample_pitch_mm)} mm sampling`;
+  document.getElementById('nozzle-disclaimer').textContent = data.disclaimer;
+  const report = document.getElementById('preservation-report');
+  report.hidden = !preservation;
+  report.classList.toggle('has-conflicts', Boolean(preservation && (preservation.conflict_percent > 0 || preservation.warning)));
+  report.textContent = preservation
+    ? `${preservationMetrics}. ${preservation.warning || 'No gap or edge conflicts detected at this sampling resolution; this is not a printability guarantee.'}`
+    : '';
+  document.getElementById('nozzle-loss-caption').textContent =
+    `Lost and extra percentages are relative to the ${intended} area${preservation ? ', not the original artwork' : ''}, not the whole body. White is the body; light gray is outside. Select any card to inspect at full resolution.`;
+  const faceDetail = data.mode === 'concave' ? '; 0.2 mm cavity-mouth widening included' : '';
+  const referenceDetail = `${treatment}${faceDetail}. ${preservation ? preservationMetrics + '. ' : ''}Before nozzle constraints.`;
+  const entries = [];
+  if (preservation && data.original_png) {
+    entries.push({
+      title: 'Original reference', line: 'Before stroke preservation', png: data.original_png,
+      detail: `Original intended pattern${faceDetail}. Download SVG remains unchanged by preservation.`,
+    });
+  }
+  entries.push({
+    title: preservation ? 'Strengthened intended' : 'Intended reference',
+    line: preservation ? 'Preservation applied · used by .3mf' : 'Before nozzle constraints',
+    png: data.ideal_png, detail: referenceDetail,
+  }, ...data.previews.map(preview => ({
+    title: `${displayMm(preview.nozzle_mm)} mm nozzle`,
+    line: `${displayMm(preview.line_width_mm)} mm assumed line${preservation ? ' · preserved' : ''}`,
+    png: preview.png, lost: nozzlePercent(preview.lost_percent), extra: nozzlePercent(preview.gained_percent),
+    detail: `${displayMm(preview.nozzle_mm)} mm nozzle · ${displayMm(preview.line_width_mm)} mm assumed line width. Lost ${nozzlePercent(preview.lost_percent)}; extra ${nozzlePercent(preview.gained_percent)} of ${intended} area.`,
+  })));
+  const grid = document.getElementById('nozzle-grid');
+  grid.replaceChildren();
+  entries.forEach(entry => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'nozzle-card';
+    card.setAttribute('aria-label', `Inspect ${entry.title}. ${entry.detail}`);
+    card.setAttribute('aria-haspopup', 'dialog');
+    const image = document.createElement('img');
+    image.src = entry.png;
+    image.alt = '';
+    const copy = document.createElement('span');
+    copy.className = 'nozzle-card-copy';
+    const title = document.createElement('span');
+    title.className = 'nozzle-card-title';
+    title.textContent = entry.title;
+    const line = document.createElement('span');
+    line.className = 'nozzle-card-line';
+    line.textContent = entry.line;
+    const metrics = document.createElement('span');
+    metrics.className = 'nozzle-card-metrics';
+    if (entry.lost !== undefined) {
+      const lost = document.createElement('span');
+      lost.className = 'nozzle-lost';
+      lost.textContent = `Lost ${entry.lost}`;
+      const extra = document.createElement('span');
+      extra.className = 'nozzle-extra';
+      extra.textContent = `Extra ${entry.extra}`;
+      metrics.append(lost, document.createElement('br'), extra);
+    } else {
+      metrics.className = 'nozzle-card-line';
+      metrics.textContent = entry.detail;
+    }
+    const inspect = document.createElement('span');
+    inspect.className = 'nozzle-card-inspect';
+    inspect.textContent = 'Inspect detail →';
+    copy.append(title, line, metrics, inspect);
+    card.append(image, copy);
+    card.onclick = () => {
+      if (nozzleRequestIsCurrent(request)) openNozzleInspection(entry);
+    };
+    grid.appendChild(card);
+  });
+}
+
+function openNozzleInspection(entry) {
+  document.getElementById('nozzle-dialog-title').textContent = entry.title;
+  document.getElementById('nozzle-dialog-detail').textContent =
+    `${entry.detail} Approximate top-face pattern, in normal clay-reading orientation.`;
+  const image = document.getElementById('nozzle-inspection-image');
+  image.alt = `${entry.title}, approximate clay-reading pattern`;
+  image.onload = setNozzleZoom;
+  image.src = entry.png;
+  document.getElementById('nozzle-zoom').value = 'fit';
+  setNozzleZoom();
+  document.getElementById('nozzle-dialog').showModal();
+}
+
+function setNozzleZoom() {
+  const zoom = document.getElementById('nozzle-zoom').value;
+  const viewport = document.getElementById('nozzle-inspection');
+  const image = document.getElementById('nozzle-inspection-image');
+  viewport.classList.toggle('fit', zoom === 'fit');
+  image.style.width = zoom === 'fit' ? '' : `${image.naturalWidth * Number(zoom)}px`;
+  image.style.height = zoom === 'fit' ? '' : 'auto';
+  viewport.scrollTop = viewport.scrollLeft = 0;
 }
 
 // ── Eraser ──

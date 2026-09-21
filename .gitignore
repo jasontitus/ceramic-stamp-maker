@@ -19,5 +19,14 @@ __pycache__/
 processor/extracted/
 processor/new/
 
+# Local scratch artwork and generated geometry at the repo root. These are
+# debug outputs from running the pipeline; real fixtures live under processor/.
+/*.scad
+/*.svg
+/*.pbm
+
+# Firebase CLI local state
+.firebase/
+
 # OS
 .DS_Store

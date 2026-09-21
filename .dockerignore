@@ -1,0 +1,29 @@
+# Build context hygiene: keep host-only artifacts out of the image.
+#
+# The macOS virtualenv MUST NOT be copied into the Linux image. Its interpreter
+# symlink points at Homebrew (/opt/homebrew/opt/python@3.13/bin/python3.13),
+# which does not exist in the container, and its compiled wheels are Mach-O.
+# The Dockerfile builds /app/processor/.venv from scratch instead.
+processor/.venv/
+processor/.venv.backup.*/
+**/__pycache__/
+**/*.pyc
+
+# Local artwork, generated geometry, and scratch output.
+*.stl
+*.3mf
+*.pbm
+*.bmp
+*.scad
+*.egg-info/
+processor/extracted/
+processor/new/
+
+# Version control, editor, and OS noise.
+.git/
+.gitignore
+.claude/
+.DS_Store
+
+# Docs and tooling not needed at runtime.
+docs/

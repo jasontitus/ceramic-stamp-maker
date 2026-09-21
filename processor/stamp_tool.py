@@ -3,6 +3,7 @@
 
 import http.server
 import json
+import math
 import os
 import socketserver
 import subprocess
@@ -14,18 +15,45 @@ from urllib.parse import urlparse
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 
-HOST = "localhost"
-DEFAULT_PORT = 8800
+from stamp_geometry import resolve_dimensions
+from print_preview import build_print_preview
+from stroke_preservation import preserve_strokes
+
+register_heif_opener(thumbnails=False)
+
+HOST = os.environ.get("STAMP_HOST", "localhost")
+DEFAULT_PORT = int(os.environ.get("PORT", "8800"))
 
 # In-memory storage
 images = {}       # id -> {"path": str, "img": np.array (grayscale)}
 extractions = {}  # id -> PNG/SVG, name, immutable baseline bitmap/SVG, and fuzz
 stamp_jobs = {}   # job_id -> {"status": "running"|"done"|"error", "path": str, "name": str, "error": str}
+preview_lock = threading.Lock()  # Bound full-resolution preview/preservation buffers.
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PNG2STAMP = os.path.join(SCRIPT_DIR, "..", "png2stamp.sh")
+
+
+def preservation_settings(data, thin_lines):
+    enabled = data.get("preserve_thin_strokes", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("preserve_thin_strokes must be true or false")
+    minimum = data.get("min_stroke_mm", 0.24)
+    if enabled:
+        if thin_lines:
+            raise ValueError("Choose Preserve thin strokes or Reinforce thin lines, not both")
+        if isinstance(minimum, bool) or not isinstance(minimum, (int, float)):
+            raise ValueError("Minimum stroke width must be between 0.15 and 1.2 mm")
+        try:
+            minimum = float(minimum)
+        except OverflowError:
+            raise ValueError("Minimum stroke width must be between 0.15 and 1.2 mm") from None
+        if not math.isfinite(minimum) or not 0.15 <= minimum <= 1.2:
+            raise ValueError("Minimum stroke width must be between 0.15 and 1.2 mm")
+    return enabled, minimum
 
 
 def simplify_bitmap(bw, fuzz):
@@ -105,6 +133,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._handle_simplify()
         elif path == "/stamp":
             self._handle_stamp()
+        elif path == "/print-preview":
+            self._handle_print_preview()
         else:
             self.send_error(404)
 
@@ -203,13 +233,39 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         ext = os.path.splitext(filename)[1].lower() if filename else ""
         is_eps = ext in (".eps", ".ps", ".ai")
         is_svg = ext in (".svg",)
+        is_heif = ext in (".heif", ".heic", ".hif", ".heifs", ".heics")
 
         # Save to temp file with correct extension
         tmp = tempfile.NamedTemporaryFile(suffix=ext or ".jpg", delete=False)
         tmp.write(file_data)
         tmp.close()
 
-        if is_svg:
+        if is_heif:
+            # Decode once to an oriented PNG: browsers need not support HEIF.
+            png_path = None
+            try:
+                with Image.open(tmp.name) as source:
+                    normalized = ImageOps.exif_transpose(source)
+                    if "A" in normalized.getbands():
+                        rgba = normalized.convert("RGBA")
+                        normalized = Image.new("RGB", rgba.size, "white")
+                        normalized.paste(rgba, mask=rgba.getchannel("A"))
+                    else:
+                        normalized = normalized.convert("RGB")
+                    png_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    png_path = png_tmp.name
+                    png_tmp.close()
+                    normalized.save(png_path, format="PNG")
+                tmp_path = png_path
+            except Exception as e:
+                if png_path is not None:
+                    os.unlink(png_path)
+                self._send_error(400, f"Could not decode HEIF/HEIC image: {e}")
+                return
+            finally:
+                os.unlink(tmp.name)
+
+        elif is_svg:
             # Rasterize SVG via rsvg-convert at high DPI for canvas preview
             try:
                 png_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
@@ -624,6 +680,56 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         print(f"  Retrace {ext_id}: {bw.shape[1]}x{bw.shape[0]}px → SVG")
         self._send_json({"id": ext_id, "svg": rec["svg"], "fuzz": 0})
 
+    # ── POST /print-preview — advisory only; never mutates artwork or jobs ──
+
+    def _handle_print_preview(self):
+        try:
+            data = json.loads(self._read_body())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_error(400, "Invalid JSON")
+            return
+        if not isinstance(data, dict):
+            self._send_error(400, "Expected a JSON object")
+            return
+        ext_id = data.get("extraction_id")
+        rec = extractions.get(ext_id) if isinstance(ext_id, str) else None
+        if not rec:
+            self._send_error(404, "Extraction not found")
+            return
+        mode = data.get("mode", "raised")
+        if mode not in ("raised", "concave"):
+            self._send_error(400, "mode must be raised or concave")
+            return
+        thin_lines = data.get("thin_lines", False)
+        if not isinstance(thin_lines, bool):
+            self._send_error(400, "thin_lines must be true or false")
+            return
+        svg_content = rec["svg"]
+        try:
+            preserve, minimum = preservation_settings(data, thin_lines)
+            dimensions = resolve_dimensions(
+                svg_content,
+                width_mm=data.get("width_mm", 36),
+                height_mm=data.get("height_mm"),
+                total_height_mm=data.get("total_height_mm", 22),
+                body_shape=data.get("body_shape", "auto"),
+                thicken="auto" if thin_lines else "0",
+            )
+            with preview_lock:
+                original = svg_content if preserve else None
+                report = None
+                if preserve:
+                    svg_content, report = preserve_strokes(svg_content, dimensions, minimum)
+                result = build_print_preview(svg_content, dimensions, mode, original_svg=original)
+                result["preservation"] = report
+        except ValueError as e:
+            self._send_error(400, str(e))
+            return
+        except (RuntimeError, OSError, cv2.error) as e:
+            self._send_error(500, f"Could not build nozzle preview: {e}")
+            return
+        self._send_json(result)
+
     # ── POST /stamp → starts background job, returns job_id ──
 
     def _handle_stamp(self):
@@ -659,28 +765,57 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             return
         print(f"  [stamp] Using SVG directly ({len(svg_content)} chars)")
 
+        if "size_mm" in data:
+            self._send_error(400, "Stamp sizing now uses overall width, height and total height. Refresh the page.")
+            return
+        thin_lines = data.get("thin_lines", False)
+        if not isinstance(thin_lines, bool):
+            self._send_error(400, "thin_lines must be true or false")
+            return
+        body_shape = data.get("body_shape", "auto")
+        try:
+            preserve, minimum = preservation_settings(data, thin_lines)
+            dimensions = resolve_dimensions(
+                svg_content,
+                width_mm=data.get("width_mm", 36),
+                height_mm=data.get("height_mm"),
+                total_height_mm=data.get("total_height_mm", 22),
+                body_shape=body_shape,
+                thicken="auto" if thin_lines else "0",
+            )
+        except ValueError as e:
+            self._send_error(400, str(e))
+            return
+
         name = data.get("name", rec["name"])
         if mode == "concave":
             name += "_concave"
-        size_mm = data.get("size_mm", "36")
-        thin_lines = data.get("thin_lines", False)
         job_id = str(uuid.uuid4())[:8]
-        stamp_jobs[job_id] = {"status": "running", "path": None, "name": name, "error": None}
+        stamp_jobs[job_id] = {
+            "status": "running", "path": None, "name": name,
+            "error": None, "dimensions": dimensions,
+        }
 
         # Run in background thread
         def run_stamp():
             tmp_dir = tempfile.mkdtemp()
             svg_path = os.path.join(tmp_dir, "input.svg")
-            with open(svg_path, "w") as f:
-                f.write(svg_content)
             output_base = os.path.join(tmp_dir, name)
             try:
-                cmd = ["bash", PNG2STAMP, svg_path, output_base, str(size_mm)]
-                if thin_lines:
-                    cmd.append("auto")
-                else:
-                    cmd.append("0")
-                cmd.append(mode)
+                processed_svg = svg_content
+                if preserve:
+                    with preview_lock:
+                        processed_svg, report = preserve_strokes(svg_content, dimensions, minimum)
+                    stamp_jobs[job_id]["preservation"] = report
+                with open(svg_path, "w") as f:
+                    f.write(processed_svg)
+                cmd = [
+                    "bash", PNG2STAMP, svg_path, output_base,
+                    str(dimensions["width_mm"]),
+                    str(dimensions["height_mm"]) if body_shape == "rectangular" else "auto",
+                    str(dimensions["total_height_mm"]), body_shape, mode,
+                    "auto" if thin_lines else "0",
+                ]
                 print(f"  [stamp] Running: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["STAMP_PYTHON"] = sys.executable
@@ -697,6 +832,10 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
                 stamp_jobs[job_id]["status"] = "error"
                 stamp_jobs[job_id]["error"] = "Timed out (>5min)"
                 return
+            except (ValueError, RuntimeError, OSError, cv2.error) as e:
+                stamp_jobs[job_id]["status"] = "error"
+                stamp_jobs[job_id]["error"] = f"Could not prepare stamp: {e}"
+                return
 
             tmf_path = output_base + ".3mf"
             if not os.path.isfile(tmf_path):
@@ -704,13 +843,13 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
                 stamp_jobs[job_id]["error"] = "3mf file not generated"
                 return
 
-            stamp_jobs[job_id]["status"] = "done"
             stamp_jobs[job_id]["path"] = tmf_path
+            stamp_jobs[job_id]["status"] = "done"
             print(f"  Stamp job {job_id} done: {name}.3mf")
 
         threading.Thread(target=run_stamp, daemon=True).start()
         print(f"  Stamp job {job_id} started for {name}")
-        self._send_json({"job_id": job_id})
+        self._send_json({"job_id": job_id, "dimensions": dimensions})
 
     # ── GET /stamp/status/<job_id> ──
 
@@ -719,7 +858,9 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         if not job:
             self._send_error(404, "Job not found")
             return
-        resp = {"status": job["status"], "name": job["name"]}
+        resp = {"status": job["status"], "name": job["name"], "dimensions": job["dimensions"]}
+        if "preservation" in job:
+            resp["preservation"] = job["preservation"]
         if job["error"]:
             resp["error"] = job["error"]
         self._send_json(resp)
@@ -751,6 +892,14 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    request_queue_size = 128
+    # Cloud Run instances are small; cap concurrency so stamp renders (OpenSCAD)
+    # and image work cannot exhaust memory on a shared container.
+    _semaphore = threading.BoundedSemaphore(int(os.environ.get("STAMP_MAX_WORKERS", "32")))
+
+    def process_request(self, request, client_address):
+        with self._semaphore:
+            super().process_request(request, client_address)
 
 
 def main():

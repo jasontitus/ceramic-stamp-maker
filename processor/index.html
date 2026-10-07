@@ -310,8 +310,38 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; c
             </div>
           </div>
           <p class="control-help control-wide" id="height-help">Auto height follows the artwork's on-screen ratio with a 1.5 mm margin on each side.</p>
+          <div class="control-group control-wide">
+            <label for="artwork-fit">Artwork fit</label>
+            <select id="artwork-fit" aria-describedby="fit-help" onchange="changeDimensions()">
+              <option value="margin">Margin (1.5 mm border)</option>
+              <option value="bleed">Full bleed: fit to edge</option>
+              <option value="fill">Full bleed: fill face, trim overflow</option>
+            </select>
+            <p class="control-help" id="fit-help">Artwork keeps a 1.5 mm border inside the body, plus room for reinforcement and the concave cavity mouth.</p>
+          </div>
           <p class="control-help control-wide" id="dimensions-help">Exact outside dimensions: width is the artwork's horizontal extent, height its vertical extent, both matching the preview. A portrait artwork therefore yields a taller-than-wide stamp. Artwork fits without stretching and is mirrored automatically for both faces. Body shape is independent of raised / concave.</p>
           <p class="control-help control-wide dimension-error" id="dimension-error" role="status" aria-live="polite"></p>
+          <div class="control-group">
+            <label for="size-nozzle">Size for nozzle</label>
+            <select id="size-nozzle" aria-describedby="size-help" onchange="updateStampButton()">
+              <option value="0.2">0.2 mm nozzle</option>
+              <option value="0.4" selected>0.4 mm nozzle</option>
+              <option value="0.6">0.6 mm nozzle</option>
+              <option value="0.8">0.8 mm nozzle</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="size-tolerance">Allowed lost / extra</label>
+            <select id="size-tolerance" aria-describedby="size-help" onchange="updateStampButton()">
+              <option value="0.5">≤ 0.5% each</option>
+              <option value="1">≤ 1% each</option>
+              <option value="2" selected>≤ 2% each</option>
+              <option value="5">≤ 5% each</option>
+            </select>
+          </div>
+          <button class="control-wide" id="btn-size-nozzle" onclick="sizeForNozzle()" aria-describedby="size-help size-status">Scale up for nozzle</button>
+          <p class="control-help control-wide" id="size-help">Finds the smallest body, keeping its proportions, at which that nozzle's lost and extra pattern (as in Compare nozzles) both stay within the allowance. Grows the stamp only; a size that already passes is kept. Judged without stroke preservation.</p>
+          <p class="control-help control-wide dimension-summary" id="size-status" role="status" aria-live="polite"></p>
           <label class="thin-lines-label control-wide">
             <input type="checkbox" id="preserve-thin-strokes" aria-describedby="stroke-treatment-help" onchange="changeStrokeTreatment('preserve')">
             Preserve thin strokes
@@ -421,6 +451,20 @@ let currentIdx = -1;
 let tool = 'rect';
 let settingsRevision = 0, viewRevision = 0;
 let nozzleComparison = null;
+let nozzleSizing = null;
+
+// A sizing reply rewrites the size inputs, which retires any export or
+// comparison; neither may start while one is in flight, nor it during them.
+function sizingBusy() {
+  return Boolean(nozzleSizing && nozzleSizing.status === 'loading');
+}
+
+// Settings are shared, so applying a size retires every extraction's export.
+function exportRunning() {
+  return results.some(x => x.stampJob && jobIsCurrent(x, x.stampJob) && x.stampJob.status === 'running');
+}
+
+const SIZING_TIMEOUT_MS = 120000;
 
 function extractionUpdating(r) {
   return r && (r.transforming || r.processing || r.simplifying || r.editing || r.desiredFuzz !== r.fuzz);
@@ -902,13 +946,22 @@ function displayMm(value) {
   return Number(value.toFixed(3)).toString();
 }
 
+// Mirrors resolve_dimensions' fill scale: the artwork's longer side, in mm.
+function fillExtentMm(shape, width, height, ratio) {
+  if (shape === 'round') return width * Math.max(ratio, 1 / ratio);
+  const designWidth = Math.max(width, height * ratio);
+  return Math.max(designWidth, designWidth / ratio);
+}
+
 function stampDimensions(r) {
   const settings = stampSettings();
   const ratio = artworkRatio(r);
   let height = settings.height_mm;
   if (settings.body_shape === 'round') height = settings.width_mm;
   if (settings.body_shape === 'auto') {
-    height = ratio ? Math.max(12, (settings.width_mm - 3) / ratio + 3) : NaN;
+    // Mirrors resolve_dimensions: full-bleed fits drop the 1.5 mm margins.
+    const margins = settings.fit === 'margin' ? 3 : 0;
+    height = ratio ? Math.max(12, (settings.width_mm - margins) / ratio + margins) : NaN;
   }
   let error = '';
   if (!Number.isFinite(settings.width_mm) || settings.width_mm < 12 || settings.width_mm > 200) {
@@ -921,6 +974,8 @@ function stampDimensions(r) {
     error = settings.body_shape === 'auto'
       ? 'Auto height exceeds 200 mm. Reduce width or choose rectangular to fit the artwork.'
       : 'Height must be between 12 and 200 mm.';
+  } else if (settings.fit === 'fill' && ratio && fillExtentMm(settings.body_shape, settings.width_mm, height, ratio) > 200) {
+    error = "Fill would enlarge the artwork beyond 200 mm. Use Full bleed: fit to edge, or a body closer to the artwork's proportions.";
   }
   return { ...settings, height_mm: height, error };
 }
@@ -932,10 +987,16 @@ function updateDimensionControls(r) {
   height.readOnly = shape !== 'rectangular';
   if (height.readOnly) height.value = Number.isFinite(dimensions.height_mm) ? displayMm(dimensions.height_mm) : '';
   document.getElementById('width-label').textContent = shape === 'round' ? 'Diameter (mm)' : 'Width (mm)';
+  const fit = dimensions.fit;
   document.getElementById('height-help').textContent = shape === 'auto'
-    ? "Auto height follows the artwork's on-screen ratio with a 1.5 mm margin on each side (minimum 12 mm)."
+    ? `Auto height follows the artwork's on-screen ratio ${fit === 'margin' ? 'with a 1.5 mm margin on each side' : 'with no margin'} (minimum 12 mm).`
     : shape === 'round' ? 'Round height equals the diameter. Artwork fits inside the circle without stretching.'
-    : 'Width and height set the rectangular body. Artwork fits within the margins without stretching.';
+    : `Width and height set the rectangular body. Artwork ${fit === 'margin' ? 'fits within the margins' : 'is scaled to the edge'} without stretching.`;
+  document.getElementById('fit-help').textContent = fit === 'bleed'
+    ? `Artwork scales up until its ink meets the body edge, with no margin or trimming. ${shape === 'auto' ? 'An auto body matches the artwork, so it meets all four edges unless the 12 mm minimum height applies.' : shape === 'round' ? 'The farthest ink touches the circle.' : 'It meets the edges on its tighter axis.'}`
+    : fit === 'fill'
+      ? 'Artwork covers the whole face; anything past the body edge is trimmed from the .3mf and the nozzle comparison. The preview above stays untrimmed.'
+      : 'Artwork keeps a 1.5 mm border inside the body, plus room for reinforcement and the concave cavity mouth.';
   document.getElementById('dimension-error').textContent = dimensions.error;
   for (const id of ['stamp-width', 'stamp-height', 'total-height']) {
     const input = document.getElementById(id);
@@ -1213,6 +1274,7 @@ function stampSettings() {
     min_stroke_mm: document.getElementById('preserve-thin-strokes').checked
       ? document.getElementById('min-stroke-mm').valueAsNumber : 0.24,
     mode: document.getElementById('stamp-mode').value,
+    fit: document.getElementById('artwork-fit').value,
   };
 }
 
@@ -1226,7 +1288,7 @@ function jobIsCurrent(r, job) {
 
 async function generateStamp() {
   const r = results[currentIdx];
-  if (extractionBusy(r) || stampDimensions(r).error || preservationError()) return;
+  if (extractionBusy(r) || stampDimensions(r).error || preservationError() || sizingBusy()) return;
   if (r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running') return;
   // Reserve before the POST: even a settings change while it is pending invalidates it.
   const job = { key: stampKey(r), view: viewRevision, status: 'running', jobId: null };
@@ -1310,21 +1372,128 @@ function updateStampButton() {
     : document.getElementById('thin-lines').checked
       ? 'Export .3mf with uniform thin-line reinforcement; Download SVG stays original.'
       : 'Export .3mf without stroke preservation or reinforcement.';
+  // Retire stale sizing and comparison requests before either computes the
+  // other's button: each one disables the other while it is in flight.
+  retireStaleSizing(r);
   updateNozzlePreview(r, dimensions);
-  btn.disabled = extractionBusy(r) || Boolean(dimensions.error || strokeError);
+  updateSizingControls(r, dimensions);
+  btn.disabled = extractionBusy(r) || Boolean(dimensions.error || strokeError) || sizingBusy();
   if (job && jobIsCurrent(r, job) && job.status === 'running') {
     btn.innerHTML = '<span class="stamp-spinner"></span>Generating...';
     btn.disabled = true;
   } else if (job && jobIsCurrent(r, job) && job.status === 'done') {
     btn.textContent = 'Download .3mf';
     btn.onclick = () => {
-      if (results[currentIdx] === r && jobIsCurrent(r, job) && !extractionBusy(r) && !stampDimensions(r).error && !preservationError()) {
+      if (results[currentIdx] === r && jobIsCurrent(r, job) && !extractionBusy(r) && !stampDimensions(r).error && !preservationError() && !sizingBusy()) {
         triggerDownload(`/stamp/download/${job.jobId}`, r.name + '.3mf');
       }
     };
   } else {
     btn.textContent = 'Generate .3mf';
   }
+}
+
+// ── Scale up for one nozzle; changes only the size inputs, never artwork ──
+function sizingKey(r) {
+  return JSON.stringify([stampKey(r), viewRevision, document.getElementById('size-nozzle').value,
+    document.getElementById('size-tolerance').value]);
+}
+
+function retireStaleSizing(r) {
+  // Any artwork, setting, selection, nozzle or allowance change retires the
+  // message, and abandons a search in flight so it cannot hold other buttons.
+  if (nozzleSizing && !nozzleSizing.applying && (nozzleSizing.result !== r || nozzleSizing.key !== sizingKey(r))) {
+    nozzleSizing.controller.abort();
+    nozzleSizing = null;
+  }
+}
+
+function updateSizingControls(r, dimensions = stampDimensions(r)) {
+  retireStaleSizing(r);
+  const loading = sizingBusy();
+  const generating = exportRunning();
+  const comparing = nozzleComparison && nozzleComparison.status === 'loading';
+  const button = document.getElementById('btn-size-nozzle');
+  button.disabled = extractionBusy(r) || Boolean(dimensions.error) || Boolean(loading || generating || comparing);
+  button.textContent = loading ? 'Sizing…' : 'Scale up for nozzle';
+  const status = document.getElementById('size-status');
+  status.classList.toggle('dimension-error', Boolean(nozzleSizing && nozzleSizing.error));
+  status.textContent = loading ? 'Searching sizes with the nozzle comparison estimate…'
+    : nozzleSizing ? nozzleSizing.message : '';
+}
+
+function sizeText(d) {
+  return d.body_shape === 'round' ? `${displayMm(d.width_mm)} mm diameter`
+    : `${displayMm(d.width_mm)} × ${displayMm(d.height_mm)} mm`;
+}
+
+async function sizeForNozzle() {
+  const r = results[currentIdx];
+  if (extractionBusy(r) || stampDimensions(r).error || sizingBusy() ||
+      (nozzleComparison && nozzleComparison.status === 'loading') || exportRunning()) return;
+  const nozzle = Number(document.getElementById('size-nozzle').value);
+  const tolerance = Number(document.getElementById('size-tolerance').value);
+  const request = {
+    result: r, key: sizingKey(r), status: 'loading', message: '', error: false,
+    applying: false, controller: new AbortController(),
+  };
+  nozzleSizing = request;
+  updateStampButton();
+  const timer = setTimeout(() => request.controller.abort(), SIZING_TIMEOUT_MS);
+  let data;
+  try {
+    const response = await fetch('/nozzle-size', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: request.controller.signal,
+      body: JSON.stringify({ extraction_id: r.id, ...stampSettings(), nozzle_mm: nozzle, tolerance_percent: tolerance }),
+    });
+    data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || 'Sizing failed');
+  } catch (err) {
+    if (nozzleSizing !== request) return;
+    request.status = 'done';
+    request.error = true;
+    const reason = err.name === 'AbortError' ? 'the search timed out' : err.message;
+    request.message = 'Could not size for nozzle: ' + reason + '. Size is unchanged.';
+    updateStampButton();
+    return;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (nozzleSizing !== request) return;
+  if (results[currentIdx] !== r || request.key !== sizingKey(r)) {
+    // Settings moved on while searching; applying the old answer would be wrong.
+    nozzleSizing = null;
+    updateStampButton();
+    return;
+  }
+  const limit = `≤ ${tolerance}% lost and extra`;
+  const current = data.current;
+  request.status = 'done';
+  const minimum = data.minimum && data.minimum.dimensions;
+  if (current.passes) {
+    const floor = minimum && minimum.width_mm < current.dimensions.width_mm
+      ? ` It still passes down to ${sizeText(minimum)}.` : '';
+    request.message = `Already large enough: at ${sizeText(current.dimensions)} a ${nozzle} mm nozzle loses ${nozzlePercent(current.lost_percent)} and adds ${nozzlePercent(current.gained_percent)} (${limit}).${floor}`;
+  } else if (!data.achievable || !(minimum.width_mm > current.dimensions.width_mm)) {
+    // Never apply a "scale-up" that is not larger than the current body.
+    const largest = data.largest || current;
+    request.error = true;
+    request.message = `Even at the largest size tried, ${sizeText(largest.dimensions)}, a ${nozzle} mm nozzle loses ${nozzlePercent(largest.lost_percent)} and adds ${nozzlePercent(largest.gained_percent)} (target ${limit}). Size is unchanged. Try ${nozzle > 0.2 ? 'a finer nozzle, ' : ''}a larger allowance, full bleed, or fuzzing.`;
+  } else {
+    document.getElementById('stamp-width').value = displayMm(minimum.width_mm);
+    if (minimum.body_shape === 'rectangular') {
+      document.getElementById('stamp-height').value = rectangularHeight = displayMm(minimum.height_mm);
+    }
+    // The resize re-renders with new settings; that must not retire this message.
+    request.applying = true;
+    changeDimensions();
+    request.applying = false;
+    request.key = sizingKey(r);
+    request.message = `Scaled up from ${sizeText(current.dimensions)} to ${sizeText(minimum)}: a ${nozzle} mm nozzle now loses ${nozzlePercent(data.minimum.lost_percent)} and adds ${nozzlePercent(data.minimum.gained_percent)} (${limit}; ${nozzlePercent(current.lost_percent)} / ${nozzlePercent(current.gained_percent)} before). Compare nozzles to inspect.`;
+  }
+  updateStampButton();
 }
 
 // ── Opt-in nozzle comparison; owns no artwork or export job state ──
@@ -1352,7 +1521,7 @@ function updateNozzlePreview(r, dimensions = stampDimensions(r)) {
   const loading = request && request.status === 'loading';
   const generating = r && r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running';
   const button = document.getElementById('btn-compare-nozzles');
-  button.disabled = extractionBusy(r) || Boolean(dimensions.error || preservationError()) || Boolean(loading || generating);
+  button.disabled = extractionBusy(r) || Boolean(dimensions.error || preservationError()) || Boolean(loading || generating) || sizingBusy();
   button.textContent = loading ? 'Comparing…' : 'Compare nozzles';
   document.getElementById('nozzle-results').hidden = !request || !request.data;
   document.getElementById('nozzle-check').setAttribute('aria-busy', Boolean(loading));
@@ -1371,7 +1540,7 @@ function updateNozzlePreview(r, dimensions = stampDimensions(r)) {
 async function compareNozzles() {
   const r = results[currentIdx];
   if (extractionBusy(r) || stampDimensions(r).error || preservationError() ||
-      (nozzleComparison && nozzleComparison.status === 'loading') ||
+      (nozzleComparison && nozzleComparison.status === 'loading') || sizingBusy() ||
       (r.stampJob && jobIsCurrent(r, r.stampJob) && r.stampJob.status === 'running')) return;
   clearNozzleComparison();
   const request = {
@@ -1380,6 +1549,7 @@ async function compareNozzles() {
   };
   nozzleComparison = request;
   updateNozzlePreview(r);
+  updateSizingControls(r);
   try {
     const response = await fetch('/print-preview', {
       method: 'POST',
@@ -1399,7 +1569,10 @@ async function compareNozzles() {
     request.status = 'error';
     request.error = 'Could not compare nozzles: ' + err.message + '. Artwork and exports are unchanged; try again.';
   } finally {
-    if (nozzleRequestIsCurrent(request)) updateNozzlePreview(r);
+    if (nozzleRequestIsCurrent(request)) {
+      updateNozzlePreview(r);
+      updateSizingControls(r);
+    }
   }
 }
 
@@ -1411,6 +1584,7 @@ function renderNozzleComparison(request) {
   const data = request.data;
   const dimensions = data.dimensions;
   const face = data.mode === 'concave' ? 'Concave face / raised clay' : 'Raised face / recessed clay';
+  const fit = { bleed: 'Full bleed (fit)', fill: 'Full bleed (fill, trimmed)' }[dimensions.fit] || '1.5 mm margin';
   const preservation = data.preservation;
   const intended = preservation ? 'strengthened intended pattern' : 'intended pattern';
   const treatment = preservation ? `Preserve thin strokes · ${displayMm(preservation.min_stroke_mm)} mm target`
@@ -1419,7 +1593,7 @@ function renderNozzleComparison(request) {
     ? `Added area ${nozzlePercent(preservation.added_percent)} of original artwork · Gap / edge conflicts ${nozzlePercent(preservation.conflict_percent)} of thin-stroke samples`
     : '';
   document.getElementById('nozzle-summary').textContent =
-    `${displayMm(dimensions.width_mm)} × ${displayMm(dimensions.height_mm)} × ${displayMm(dimensions.total_height_mm)} mm body · ${face} · ${treatment} · ${displayMm(data.sample_pitch_mm)} mm sampling`;
+    `${displayMm(dimensions.width_mm)} × ${displayMm(dimensions.height_mm)} × ${displayMm(dimensions.total_height_mm)} mm body · ${fit} · ${face} · ${treatment} · ${displayMm(data.sample_pitch_mm)} mm sampling`;
   document.getElementById('nozzle-disclaimer').textContent = data.disclaimer;
   const report = document.getElementById('preservation-report');
   report.hidden = !preservation;

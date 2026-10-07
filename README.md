@@ -14,8 +14,10 @@ A web-based tool for extracting symbols, shapes, and motifs from images or vecto
 - **SVG export** — Download clean vector SVGs traced with potrace
 - **3D stamp generation** — Generate `.3mf` files via OpenSCAD with a raised face for recessed artwork in clay, or a concave face for raised artwork in clay
 - **Overall body dimensions** — Auto-proportioned, rectangular, or round bodies with explicit width, face height, and total height; optional 65 × 15 × 20 mm signature preset
+- **Full bleed** — Scale artwork to the body edge with no margin, or fill the whole face and trim the overflow
 - **Fuzzing** — Locally smooth outlines and remove fine details before SVG export or stamp generation; no API token required
 - **Nozzle detail comparison** — Inspect approximate pattern loss and unwanted additions for 0.2, 0.4, 0.6, and 0.8 mm nozzles at the chosen physical stamp size
+- **Scale up for nozzle** — Grow the body, keeping its proportions, to the smallest size at which a chosen nozzle keeps the artwork's detail
 - **Preserve thin strokes** — Selectively widen undersized strokes at the final physical size, keeping original vector contours and reporting conflicts with protected gaps
 - **Non-blocking** — All processing runs in background threads; keep selecting while stamps generate
 - **Smart filenames** — Output files named after the source image (e.g., `IMG-3570-extract-1.3mf`)
@@ -188,12 +190,29 @@ Open http://localhost:8800 in your browser.
 4. Use **Paint / Erase**, **Invert**, or **Fill Holes** to refine
 5. Adjust **Fuzzing** to reduce small details and smooth the shape. Release the slider to update the preview. Returning to 0 restores the artwork from before fuzzing; paint/erase and invert establish a new baseline.
 6. Choose the stamp face: **Raised** presses the artwork into clay; **Concave** recesses the artwork into the stamp so it stands out in clay.
-7. Choose **Body shape** and overall dimensions. **Auto** follows the artwork ratio; **Rectangular** accepts independent width and face height; **Round** uses a diameter.
+7. Choose **Body shape** and overall dimensions. **Auto** follows the artwork ratio; **Rectangular** accepts independent width and face height; **Round** uses a diameter. Choose **Artwork fit**: **Margin** keeps a 1.5 mm border; **Full bleed: fit to edge** scales the artwork until it meets the edge; **Full bleed: fill face** covers the whole face and trims the overflow.
 8. For the 15 × 65 × 20 mm signature stamp, click **Use 65 × 15 × 20 mm**: 65 mm along the horizontal lettering, 15 mm across it, and 20 mm total height. This is an optional rectangular preset, not the default for other stamps.
 9. For delicate signatures, enable **Preserve thin strokes** and choose a target nozzle to fill in a starting minimum width, or enter your own. Then click **Compare nozzles** to inspect original, strengthened, and estimated printed detail for 0.2, 0.4, 0.6, and 0.8 mm nozzles. Select a card for full-resolution inspection and up to 400% zoom. Recompare after changing artwork or stamp settings.
-10. Click **Download SVG** or **Generate .3mf** for output. Fuzzing affects both; face mode, dimensions, preservation, and reinforcement affect the 3D stamp and its nozzle comparison, not the source SVG download.
+10. To make detail printable with a particular nozzle, choose **Size for nozzle** and an **Allowed lost / extra** percentage, then click **Scale up for nozzle**. See [Sizing for a nozzle](#sizing-for-a-nozzle).
+11. Click **Download SVG** or **Generate .3mf** for output. Fuzzing affects both; face mode, dimensions, preservation, and reinforcement affect the 3D stamp and its nozzle comparison, not the source SVG download.
 
-All sizing controls are in **millimeters**. Width and face height describe the outside footprint — width is the artwork's horizontal extent and face height its vertical extent, both matching the preview, so a portrait artwork yields a taller-than-wide stamp. **Overall height** includes the broad grip block and the 2.8 mm stamping relief, not an additional handle. The artwork fits uniformly inside a minimum 1.5 mm margin without stretching. Round bodies fit the artwork's bounding-box corners inside the circle. Auto sizing derives face height from the artwork ratio, with a 12 mm minimum. Width/face height are limited to 12–200 mm; overall height is 8–60 mm. A very tall auto result over 200 mm needs a smaller width or a rectangular fit.
+All sizing controls are in **millimeters**. Width and face height describe the outside footprint — width is the artwork's horizontal extent and face height its vertical extent, both matching the preview, so a portrait artwork yields a taller-than-wide stamp. **Overall height** includes the broad grip block and the 2.8 mm stamping relief, not an additional handle. With the default **Margin** fit, the artwork fits uniformly inside a minimum 1.5 mm margin without stretching, and round bodies fit the artwork's bounding-box corners inside the circle. Auto sizing derives face height from the artwork ratio, with a 12 mm minimum. Width/face height are limited to 12–200 mm; overall height is 8–60 mm. A very tall auto result over 200 mm needs a smaller width or a rectangular fit.
+
+### Full bleed
+
+**Full bleed: fit to edge** removes the margin and scales the artwork uniformly until its ink meets the body edge. A rectangular body meets it on the artwork's tighter axis; an **Auto** body matches the artwork, so it meets all four edges unless the 12 mm minimum height applies. A round body fits the farthest ink to the circle, measured from the rendered artwork's center rather than its bounding-box corners, so a circular motif fills a round stamp. Nothing is trimmed beyond sub-pixel rounding at the edge.
+
+**Full bleed: fill face** covers the whole face, like a photo cropped to a frame, and trims whatever extends past the edge. Fill is rejected if it would enlarge the artwork beyond 200 mm; use fit, or a body closer to the artwork's proportions.
+
+In both full-bleed fits, reinforcement and the concave cavity mouth are trimmed at the body edge rather than overhanging it, and concave cavities may open through the side walls where the artwork meets the edge. The nozzle comparison counts only the visible face. The artwork preview and **Download SVG** are not trimmed.
+
+### Sizing for a nozzle
+
+**Scale up for nozzle** finds the smallest body at which the chosen nozzle's **lost** and **extra** percentages, as reported by **Compare nozzles**, are both at or below the allowance: 0.5%, 1%, 2% (default), or 5%. Candidate sizes are whole tenths of a millimeter, judged by the same estimate as the comparison cards, so comparing after scaling shows the same numbers while **Preserve thin strokes** is off. Rectangular bodies keep their proportions; auto and round bodies change width or diameter. Face mode, artwork fit, and reinforcement are included; **Preserve thin strokes** is not, so the size is the one at which the artwork itself survives.
+
+It only grows the stamp. If the current size already passes, it is kept, and the smallest size it keeps passing down to is reported. Otherwise it tries sizes upward from the current one; if none passes up to the 200 mm limit, the size is left unchanged and the result at the largest size is reported. Try a finer nozzle, a larger allowance, full bleed, or fuzzing. Artwork too fine to cover a single 0.05 mm sample at a given size counts as entirely lost there, in both the sizing and the comparison.
+
+The percentages are area-based. A disk-shaped nozzle also rounds sharp corners and trims tapering tips at any size, so artwork with many points or very fine texture, such as needles or fractal branching, may need a larger allowance. Very fine source detail may not pass within 200 mm at all. As with the comparison, this is an estimate, not a slicer simulation.
 
 The SVG preview shows artwork, not a 3D body preview. Mirroring for readable clay impressions is automatic in both face modes; do not mirror text again in Bambu Studio. Keep Bambu Studio's model scale at 100% when matching the preset to other stamps. Exported dimensions do not compensate for printer tolerances or clay shrinkage.
 
@@ -215,10 +234,10 @@ The comparison shows **Original reference** beside **Strengthened intended**. Ad
 
 Preservation is reversible and never accumulates: switching it off restores untreated stamp geometry. It is mutually exclusive with **Reinforce thin lines**, which uniformly expands outlines. The main artwork preview and **Download SVG** remain unchanged; both raised and concave `.3mf` exports use the same preserved SVG geometry as the comparison. In concave mode, normal cavity-mouth widening still applies afterward. A slicer may resolve tight gaps differently, so inspect the final sliced top layers and test-print before using the stamp in clay.
 
-Physical stroke/topology and OpenSCAD export regressions can be run with:
+Physical stroke/topology, artwork fit, nozzle sizing, and OpenSCAD export regressions can be run with:
 
 ```bash
-processor/.venv/bin/python -m unittest discover -s processor -p test_stroke_preservation.py -v
+processor/.venv/bin/python -m unittest discover -s processor -p 'test_*.py' -v
 ```
 
 ## Pipeline
@@ -243,8 +262,12 @@ bash png2stamp.sh design.svg output 36 auto 22 auto raised auto
 # Round body, 36 mm diameter:
 bash png2stamp.sh design.svg output 36 auto 22 round raised 0
 
+# Full bleed: 15 x 65 mm body, artwork scaled to meet the edge:
+bash png2stamp.sh design.svg output 15 65 20 rectangular raised 0 bleed
+
 # Arguments: input, output base, width/diameter, face height or auto,
-#            total height, auto|rectangular|round, raised|concave, thickening mm|auto
+#            total height, auto|rectangular|round, raised|concave, thickening mm|auto,
+#            and optionally margin (default)|bleed|fill
 ```
 
 ## Project Structure
@@ -264,7 +287,9 @@ ceramic-stamps/
 │   ├── stamp_tool.py     # Python HTTP server + processing API
 │   ├── stamp_geometry.py # Shared dimension validation and OpenSCAD geometry
 │   ├── print_preview.py  # Physical-scale nozzle feature/gap estimates
+│   ├── nozzle_sizing.py  # Smallest body size that keeps a nozzle's detail
 │   ├── stroke_preservation.py # Selective, reversible physical stroke widening
 │   ├── test_stroke_preservation.py # Stroke/gap and real-renderer regressions
+│   ├── test_fit_and_sizing.py # Full-bleed fits and nozzle sizing
 │   └── index.html        # Single-page web frontend
 ```

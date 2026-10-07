@@ -1,7 +1,7 @@
 #!/bin/bash
 # png2stamp.sh - Convert PNG/SVG artwork to a 3D-printable ceramic stamp
 #
-# Usage: ./png2stamp.sh input.png [output_base] [width_mm] [height_mm|auto] [total_height_mm] [auto|rectangular|round] [raised|concave] [thicken_mm|auto]
+# Usage: ./png2stamp.sh input.png [output_base] [width_mm] [height_mm|auto] [total_height_mm] [auto|rectangular|round] [raised|concave] [thicken_mm|auto] [margin|bleed|fill]
 #
 # Produces a .3mf file ready to open in Bambu Studio with all print
 # settings pre-configured. Print face UP for sharpest detail.
@@ -9,7 +9,7 @@
 # Raised faces press the artwork into clay; concave faces leave raised artwork.
 # Concave faces include a surrounding pressing surface and a solid cavity floor.
 #
-# Dependencies: python3 + Pillow, potrace, openscad
+# Dependencies: python3 + Pillow, potrace, openscad; rsvg-convert for round + bleed
 
 set -euo pipefail
 
@@ -29,7 +29,7 @@ done
 
 
 usage() {
-    echo "Usage: $0 <input.png|input.svg> [output_base] [width_mm] [height_mm|auto] [total_height_mm] [auto|rectangular|round] [raised|concave] [thicken_mm|auto]"
+    echo "Usage: $0 <input.png|input.svg> [output_base] [width_mm] [height_mm|auto] [total_height_mm] [auto|rectangular|round] [raised|concave] [thicken_mm|auto] [margin|bleed|fill]"
     echo ""
     echo "  input         Black-on-white or transparent artwork"
     echo "  output_base   Base name for outputs (default: <input>_stamp)"
@@ -41,6 +41,10 @@ usage() {
     echo "  mode          raised (default): recessed artwork in clay"
     echo "                concave: raised artwork in clay, enclosed cavity and floor"
     echo "  thicken_mm    Printability offset, 0..2, or auto (default: auto)"
+    echo "  fit           margin (default): 1.5mm border around the artwork"
+    echo "                bleed: artwork scaled to meet the body edge, no margin"
+    echo "                fill: artwork covers the whole face; overflow trimmed"
+    echo "                (round + bleed measures the ink with rsvg-convert)"
     echo ""
     echo "Produces:"
     echo "  *_stamp.3mf   - Bambu Studio project (open directly, settings included)"
@@ -51,7 +55,7 @@ usage() {
 }
 
 # ── Parse arguments ──
-[[ $# -lt 1 || $# -gt 8 ]] && usage
+[[ $# -lt 1 || $# -gt 9 ]] && usage
 INPUT_FILE="$1"
 [[ ! -f "$INPUT_FILE" ]] && echo "Error: File not found: $INPUT_FILE" && exit 1
 
@@ -65,6 +69,7 @@ TOTAL_HEIGHT_MM="${5:-22}"
 BODY_SHAPE="${6:-auto}"
 STAMP_MODE="${7:-raised}"
 THICKEN_ARG="${8:-auto}"
+ARTWORK_FIT="${9:-margin}"
 case "$STAMP_MODE" in
     raised|concave) ;;
     *) echo "Error: mode must be raised or concave" >&2; exit 1 ;;
@@ -72,6 +77,10 @@ esac
 case "$BODY_SHAPE" in
     auto|rectangular|round) ;;
     *) echo "Error: body_shape must be auto, rectangular or round" >&2; exit 1 ;;
+esac
+case "$ARTWORK_FIT" in
+    margin|bleed|fill) ;;
+    *) echo "Error: fit must be margin, bleed or fill" >&2; exit 1 ;;
 esac
 # When input is SVG, skip bitmap conversion and potrace (use SVG directly)
 SVG_INPUT=false
@@ -105,6 +114,9 @@ if ! $SVG_INPUT; then
     command -v potrace &>/dev/null || MISSING+=("potrace")
 fi
 command -v "$OPENSCAD" &>/dev/null || MISSING+=("openscad")
+if [[ "$BODY_SHAPE" == "round" && "$ARTWORK_FIT" == "bleed" ]]; then
+    command -v rsvg-convert &>/dev/null || MISSING+=("rsvg-convert")
+fi
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo "Error: Missing dependencies: ${MISSING[*]}"
     exit 1
@@ -177,7 +189,7 @@ fi
 echo "[3/5] Building 3D stamp model..."
 "$PYTHON" "$SCRIPT_DIR/processor/stamp_geometry.py" \
     "$OUTPUT_SVG" "$OUTPUT_SCAD" "$WIDTH_MM" "$HEIGHT_MM" \
-    "$TOTAL_HEIGHT_MM" "$BODY_SHAPE" "$STAMP_MODE" "$THICKEN_ARG"
+    "$TOTAL_HEIGHT_MM" "$BODY_SHAPE" "$STAMP_MODE" "$THICKEN_ARG" "$ARTWORK_FIT"
 echo "  Saved: $OUTPUT_SVG"
 
 echo "  Saved: $OUTPUT_SCAD"

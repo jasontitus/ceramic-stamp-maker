@@ -8,10 +8,13 @@ import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 
-from stamp_geometry import MOUTH_MM, ROUND_SEGMENTS, SVG_DPI, svg_dimensions
+from stamp_geometry import MAX_DESIGN_MM, MOUTH_MM, ROUND_SEGMENTS, SVG_DPI, svg_dimensions
 
 
 SAMPLE_PITCH_MM = 0.05
+# Artwork too fine to cover a single sample at this size has no pattern left:
+# report it as entirely lost rather than as a perfect 0 of 0.
+_EMPTY_LOST = 100.0
 NOZZLES_MM = (0.2, 0.4, 0.6, 0.8)
 _SVG = "http://www.w3.org/2000/svg"
 _DISCLAIMER = (
@@ -147,8 +150,8 @@ def _png(image):
     return "data:image/png;base64," + base64.b64encode(encoded).decode("ascii")
 
 
-def build_print_preview(svg_content, dimensions, mode, original_svg=None):
-    """Estimate four nozzles against the same full-resolution intended top pattern."""
+def _intended_pattern(svg_content, dimensions, mode):
+    """Rasterize the top-face pattern the stamp intends, clipped to its body."""
     if mode not in ("raised", "concave"):
         raise ValueError("mode must be raised or concave")
     if not isinstance(dimensions, dict):
@@ -156,8 +159,10 @@ def build_print_preview(svg_content, dimensions, mode, original_svg=None):
     width = _dimension(dimensions, "width_mm", 12, 200)
     height = _dimension(dimensions, "height_mm", 12, 200)
     _dimension(dimensions, "total_height_mm", 8, 60)
-    design_width = _dimension(dimensions, "design_width_mm", 1e-9, width)
-    design_height = _dimension(dimensions, "design_height_mm", 1e-9, height)
+    # Only a full-bleed fit may overflow the body; the body then trims it.
+    clip = dimensions.get("fit") in ("bleed", "fill")
+    design_width = _dimension(dimensions, "design_width_mm", 1e-9, MAX_DESIGN_MM if clip else width)
+    design_height = _dimension(dimensions, "design_height_mm", 1e-9, MAX_DESIGN_MM if clip else height)
     thicken = _dimension(dimensions, "thicken_mm", 0, 2)
     shape = dimensions.get("body_shape")
     if shape not in ("auto", "rectangular", "round"):
@@ -173,8 +178,34 @@ def build_print_preview(svg_content, dimensions, mode, original_svg=None):
         intended = cv2.dilate(intended, _disk(MOUTH_MM),
                               borderType=cv2.BORDER_CONSTANT, borderValue=0)
     cv2.bitwise_and(intended, body, dst=intended)
-    intended_area = cv2.countNonZero(intended)
+    return intended, body
+
+
+def _nozzle_pattern(intended, body, mode, nozzle):
+    """Return the estimated printed pattern and its lost / gained masks."""
+    line_width = round(nozzle * 1.05, 2)
     solid = intended if mode == "raised" else cv2.subtract(body, intended)
+    filtered = _filter_material(solid, body, line_width)
+    pattern = filtered if mode == "raised" else cv2.subtract(body, filtered)
+    return line_width, cv2.subtract(intended, pattern), cv2.subtract(pattern, intended)
+
+
+def _percent(mask, area, empty=0.0):
+    return round(100 * cv2.countNonZero(mask) / area, 2) if area else empty
+
+
+def nozzle_detail(svg_content, dimensions, mode, nozzle):
+    """Lost / extra percentages for one nozzle, exactly as the comparison reports them."""
+    intended, body = _intended_pattern(svg_content, dimensions, mode)
+    area = cv2.countNonZero(intended)
+    _, lost, gained = _nozzle_pattern(intended, body, mode, nozzle)
+    return _percent(lost, area, _EMPTY_LOST), _percent(gained, area)
+
+
+def build_print_preview(svg_content, dimensions, mode, original_svg=None):
+    """Estimate four nozzles against the same full-resolution intended top pattern."""
+    intended, body = _intended_pattern(svg_content, dimensions, mode)
+    intended_area = cv2.countNonZero(intended)
 
     # Reuse one display canvas; each nozzle starts from the unfiltered solid mask.
     image = np.empty((*body.shape, 3), dtype=np.uint8)
@@ -188,11 +219,7 @@ def build_print_preview(svg_content, dimensions, mode, original_svg=None):
     ideal_png = _png(image)
     previews = []
     for nozzle in NOZZLES_MM:
-        line_width = round(nozzle * 1.05, 2)
-        filtered = _filter_material(solid, body, line_width)
-        pattern = filtered if mode == "raised" else cv2.subtract(body, filtered)
-        lost = cv2.subtract(intended, pattern)
-        gained = cv2.subtract(pattern, intended)
+        line_width, lost, gained = _nozzle_pattern(intended, body, mode, nozzle)
         paint()
         image[lost != 0] = (96, 69, 233)  # OpenCV BGR: #e94560
         image[gained != 0] = (0, 165, 240)  # OpenCV BGR: #f0a500
@@ -200,10 +227,10 @@ def build_print_preview(svg_content, dimensions, mode, original_svg=None):
             "nozzle_mm": nozzle,
             "line_width_mm": line_width,
             "png": _png(image),
-            "lost_percent": round(100 * cv2.countNonZero(lost) / intended_area, 2) if intended_area else 0.0,
-            "gained_percent": round(100 * cv2.countNonZero(gained) / intended_area, 2) if intended_area else 0.0,
+            "lost_percent": _percent(lost, intended_area, _EMPTY_LOST),
+            "gained_percent": _percent(gained, intended_area),
         })
-        del filtered, pattern, lost, gained
+        del lost, gained
     result = {
         "dimensions": dict(dimensions),
         "mode": mode,
@@ -213,12 +240,7 @@ def build_print_preview(svg_content, dimensions, mode, original_svg=None):
         "disclaimer": _DISCLAIMER,
     }
     if original_svg is not None:
-        intended, _ = _rasterize(original_svg, width, height, design_width, design_height, shape)
-        if thicken > 0:
-            intended = cv2.dilate(intended, _disk(thicken), borderType=cv2.BORDER_CONSTANT, borderValue=0)
-        if mode == "concave":
-            intended = cv2.dilate(intended, _disk(MOUTH_MM), borderType=cv2.BORDER_CONSTANT, borderValue=0)
-        cv2.bitwise_and(intended, body, dst=intended)
+        intended, _ = _intended_pattern(original_svg, dimensions, mode)
         paint()
         result["original_png"] = _png(image)
     return result

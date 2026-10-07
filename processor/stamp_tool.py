@@ -19,6 +19,7 @@ from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 
 from stamp_geometry import resolve_dimensions
+from nozzle_sizing import size_for_nozzle
 from print_preview import build_print_preview
 from stroke_preservation import preserve_strokes
 
@@ -135,6 +136,8 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._handle_stamp()
         elif path == "/print-preview":
             self._handle_print_preview()
+        elif path == "/nozzle-size":
+            self._handle_nozzle_size()
         else:
             self.send_error(404)
 
@@ -707,19 +710,23 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         svg_content = rec["svg"]
         try:
             preserve, minimum = preservation_settings(data, thin_lines)
-            dimensions = resolve_dimensions(
-                svg_content,
-                width_mm=data.get("width_mm", 36),
-                height_mm=data.get("height_mm"),
-                total_height_mm=data.get("total_height_mm", 22),
-                body_shape=data.get("body_shape", "auto"),
-                thicken="auto" if thin_lines else "0",
-            )
+            sizing = {
+                "width_mm": data.get("width_mm", 36),
+                "height_mm": data.get("height_mm"),
+                "total_height_mm": data.get("total_height_mm", 22),
+                "body_shape": data.get("body_shape", "auto"),
+                "thicken": "auto" if thin_lines else "0",
+                "fit": data.get("fit", "margin"),
+            }
+            dimensions = resolve_dimensions(svg_content, **sizing)
             with preview_lock:
                 original = svg_content if preserve else None
                 report = None
                 if preserve:
                     svg_content, report = preserve_strokes(svg_content, dimensions, minimum)
+                    # Match the exporter, which resolves the preserved SVG: a
+                    # round full bleed fits measured ink that widening can extend.
+                    dimensions = resolve_dimensions(svg_content, **sizing)
                 result = build_print_preview(svg_content, dimensions, mode, original_svg=original)
                 result["preservation"] = report
         except ValueError as e:
@@ -727,6 +734,50 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             return
         except (RuntimeError, OSError, cv2.error) as e:
             self._send_error(500, f"Could not build nozzle preview: {e}")
+            return
+        self._send_json(result)
+
+    # ── POST /nozzle-size — advisory: smallest body that keeps one nozzle's detail ──
+
+    def _handle_nozzle_size(self):
+        try:
+            data = json.loads(self._read_body())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_error(400, "Invalid JSON")
+            return
+        if not isinstance(data, dict):
+            self._send_error(400, "Expected a JSON object")
+            return
+        ext_id = data.get("extraction_id")
+        rec = extractions.get(ext_id) if isinstance(ext_id, str) else None
+        if not rec:
+            self._send_error(404, "Extraction not found")
+            return
+        mode = data.get("mode", "raised")
+        if mode not in ("raised", "concave"):
+            self._send_error(400, "mode must be raised or concave")
+            return
+        thin_lines = data.get("thin_lines", False)
+        if not isinstance(thin_lines, bool):
+            self._send_error(400, "thin_lines must be true or false")
+            return
+        settings = {
+            "width_mm": data.get("width_mm", 36),
+            "height_mm": data.get("height_mm"),
+            "total_height_mm": data.get("total_height_mm", 22),
+            "body_shape": data.get("body_shape", "auto"),
+            "thicken": "auto" if thin_lines else "0",
+            "fit": data.get("fit", "margin"),
+        }
+        try:
+            with preview_lock:
+                result = size_for_nozzle(rec["svg"], settings, mode,
+                                         data.get("nozzle_mm"), data.get("tolerance_percent"))
+        except ValueError as e:
+            self._send_error(400, str(e))
+            return
+        except (RuntimeError, OSError, cv2.error) as e:
+            self._send_error(500, f"Could not size stamp for nozzle: {e}")
             return
         self._send_json(result)
 
@@ -782,9 +833,13 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
                 total_height_mm=data.get("total_height_mm", 22),
                 body_shape=body_shape,
                 thicken="auto" if thin_lines else "0",
+                fit=data.get("fit", "margin"),
             )
         except ValueError as e:
             self._send_error(400, str(e))
+            return
+        except (RuntimeError, OSError, cv2.error) as e:
+            self._send_error(500, f"Could not fit artwork: {e}")
             return
 
         name = data.get("name", rec["name"])
@@ -815,6 +870,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
                     str(dimensions["height_mm"]) if body_shape == "rectangular" else "auto",
                     str(dimensions["total_height_mm"]), body_shape, mode,
                     "auto" if thin_lines else "0",
+                    dimensions["fit"],
                 ]
                 print(f"  [stamp] Running: {' '.join(cmd)}")
                 env = os.environ.copy()

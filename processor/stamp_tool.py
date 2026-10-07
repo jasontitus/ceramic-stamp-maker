@@ -5,6 +5,7 @@ import http.server
 import json
 import math
 import os
+import re
 import socketserver
 import subprocess
 import sys
@@ -33,6 +34,22 @@ images = {}       # id -> {"path": str, "img": np.array (grayscale)}
 extractions = {}  # id -> PNG/SVG, name, immutable baseline bitmap/SVG, and fuzz
 stamp_jobs = {}   # job_id -> {"status": "running"|"done"|"error", "path": str, "name": str, "error": str}
 preview_lock = threading.Lock()  # Bound full-resolution preview/preservation buffers.
+
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9 ._-]+")
+
+
+def safe_filename(name, fallback):
+    """A client-supplied basename that is safe as a path part and a header value.
+
+    Path separators, quotes, and control characters would let a name escape
+    the job's temp directory or inject response headers; ASCII keeps
+    http.server's latin-1 header encoding from failing.
+    """
+    if not isinstance(name, str):
+        return fallback
+    cleaned = _UNSAFE_NAME.sub("_", name).strip(" .")[:120]
+    return cleaned or fallback
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PNG2STAMP = os.path.join(SCRIPT_DIR, "..", "png2stamp.sh")
@@ -189,7 +206,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         query = urlparse(self.path).query
         params = parse_qs(query)
         if "dl" in params:
-            fname = params["dl"][0]
+            fname = safe_filename(params["dl"][0], "artwork.svg")
             self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
         self.end_headers()
         self.wfile.write(svg)
@@ -514,7 +531,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         tmp_dir = tempfile.mkdtemp()
         rec = {
             "png_path": os.path.join(tmp_dir, "extract.png"),
-            "name": data.get("name", f"extract_{ext_id}"),
+            "name": safe_filename(data.get("name"), f"extract_{ext_id}"),
         }
         if not self._update_extraction(rec, bw, reset_baseline=True):
             os.rmdir(tmp_dir)
@@ -559,7 +576,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
     def _handle_simplify(self):
         try:
             data = json.loads(self._read_body())
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except ValueError:
             self._send_error(400, "Invalid JSON")
             return
         if not isinstance(data, dict):
@@ -591,7 +608,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
     def _handle_invert(self):
         try:
             data = json.loads(self._read_body())
-        except json.JSONDecodeError:
+        except ValueError:
             self._send_error(400, "Invalid JSON")
             return
 
@@ -688,7 +705,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
     def _handle_print_preview(self):
         try:
             data = json.loads(self._read_body())
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except ValueError:
             self._send_error(400, "Invalid JSON")
             return
         if not isinstance(data, dict):
@@ -742,7 +759,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
     def _handle_nozzle_size(self):
         try:
             data = json.loads(self._read_body())
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except ValueError:
             self._send_error(400, "Invalid JSON")
             return
         if not isinstance(data, dict):
@@ -786,7 +803,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
     def _handle_stamp(self):
         try:
             data = json.loads(self._read_body())
-        except json.JSONDecodeError:
+        except ValueError:
             self._send_error(400, "Invalid JSON")
             return
 
@@ -842,7 +859,7 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             self._send_error(500, f"Could not fit artwork: {e}")
             return
 
-        name = data.get("name", rec["name"])
+        name = safe_filename(data.get("name"), rec["name"])
         if mode == "concave":
             name += "_concave"
         job_id = str(uuid.uuid4())[:8]

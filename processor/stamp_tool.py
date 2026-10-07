@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Stamp Extractor Web Tool — Python HTTP server + image processing API."""
 
+import collections
 import http.server
 import json
 import math
 import os
 import re
+import select
+import socket
 import socketserver
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -33,7 +37,141 @@ DEFAULT_PORT = int(os.environ.get("PORT", "8800"))
 images = {}       # id -> {"path": str, "img": np.array (grayscale)}
 extractions = {}  # id -> PNG/SVG, name, immutable baseline bitmap/SVG, and fuzz
 stamp_jobs = {}   # job_id -> {"status": "running"|"done"|"error", "path": str, "name": str, "error": str}
-preview_lock = threading.Lock()  # Bound full-resolution preview/preservation buffers.
+
+
+class FairLock:
+    """A lock handed to its waiters in arrival order.
+
+    threading.Lock lets any waiter win on release, so a waiter that wakes now
+    and then to check on its client rejoins behind every blocking waiter and
+    can starve indefinitely. Here each waiter keeps its place in line, and
+    release hands the lock straight to the oldest one.
+    """
+
+    def __init__(self):
+        self._mutex = threading.Lock()
+        self._waiters = collections.deque()
+        self._held = False
+
+    def acquire(self, blocking=True, timeout=-1, checkpoint=None, poll_seconds=0.25):
+        """Like threading.Lock.acquire; ``checkpoint`` runs every ``poll_seconds``
+        while waiting and may raise to give up the place in line."""
+        with self._mutex:
+            if not self._held and not self._waiters:
+                self._held = True
+                return True
+            if not blocking:
+                return False
+            turn = threading.Event()
+            self._waiters.append(turn)
+        deadline = None if timeout < 0 else time.monotonic() + timeout
+        try:
+            while True:
+                wait = poll_seconds if checkpoint else None
+                if deadline is not None:
+                    remaining = max(0.0, deadline - time.monotonic())
+                    wait = remaining if wait is None else min(wait, remaining)
+                if turn.wait(wait):
+                    return True
+                if deadline is not None and time.monotonic() >= deadline:
+                    self._withdraw(turn)
+                    return False
+                if checkpoint:
+                    checkpoint()
+        except BaseException:
+            self._withdraw(turn)
+            raise
+
+    def _withdraw(self, turn):
+        with self._mutex:
+            if turn.is_set():
+                self._hand_on()  # Handed over just as we gave up: pass it along.
+            else:
+                self._waiters.remove(turn)
+
+    def _hand_on(self):
+        if self._waiters:
+            self._waiters.popleft().set()
+        else:
+            self._held = False
+
+    def release(self):
+        with self._mutex:
+            if not self._held:
+                raise RuntimeError("release unlocked lock")
+            self._hand_on()
+
+    def locked(self):
+        return self._held
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
+preview_lock = FairLock()  # Bound full-resolution preview/preservation buffers.
+# One nozzle-sizing search at a time. A search runs many preview-sized
+# evaluations, each under preview_lock so previews interleave with it. A new
+# search waits briefly for the slot (long enough for an abandoned search to
+# notice its client is gone), then is refused rather than queued.
+sizing_slot = threading.Semaphore(1)
+SIZING_WAIT_SECONDS = 3
+# Once a search has waited this long in total for preview_lock, previews are
+# queuing faster than they clear; it then keeps the lock until it finishes
+# rather than queue behind every preview for each of its evaluations.
+SIZING_CONTENDED_SECONDS = 5
+# A backstop: give up with a clear answer before the UI's own 120 s timeout.
+SIZING_DEADLINE_SECONDS = 100
+SIZING_RETRY_SECONDS = 5
+
+
+class SearchLock:
+    """preview_lock for one sizing search: per evaluation until contended.
+
+    Released between evaluations so previews interleave with a search. If the
+    search's total wait for it passes SIZING_CONTENDED_SECONDS, it is held from
+    then on; only one search runs at a time, so that hold is bounded. While
+    waiting it runs ``checkpoint`` every ``poll_seconds``, so an abandoned
+    search stops even while queued. ``close()`` releases a held lock and must
+    always run.
+    """
+
+    def __init__(self, lock, checkpoint=lambda: None, clock=time.monotonic, poll_seconds=0.25):
+        self.lock = lock
+        self.checkpoint = checkpoint
+        self.clock = clock
+        self.poll_seconds = poll_seconds
+        self.waited = 0.0
+        self.holding = False
+
+    def __enter__(self):
+        if not self.holding:
+            start = self.clock()
+            self.lock.acquire(checkpoint=self.checkpoint, poll_seconds=self.poll_seconds)
+            self.waited += self.clock() - start
+            self.holding = True
+
+    def __exit__(self, *exc):
+        if self.waited <= SIZING_CONTENDED_SECONDS:
+            self.close()
+        return False
+
+    def close(self):
+        if self.holding:
+            self.holding = False
+            self.lock.release()
+
+
+class SizingStopped(Exception):
+    """A nozzle-sizing search stopped early; ``reason`` says why."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
 
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9 ._-]+")
 
@@ -103,13 +241,30 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
         # Quieter logging — just method + path
         print(f"  {args[0]}")
 
-    def _send_json(self, data, status=200):
+    def _send_json(self, data, status=200, headers=()):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _client_gone(self):
+        """True once the client has closed its connection (EOF is readable).
+
+        A client that half-closes after sending its request looks the same;
+        browsers and proxies do not. poll(), unlike select(), works for any fd.
+        """
+        poller = select.poll()
+        poller.register(self.connection, select.POLLIN)
+        try:
+            if not poller.poll(0):
+                return False
+            return not self.connection.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return True
 
     def _send_error(self, status, msg):
         self._send_json({"error": msg}, status)
@@ -786,17 +941,39 @@ class StampHandler(http.server.BaseHTTPRequestHandler):
             "thicken": "auto" if thin_lines else "0",
             "fit": data.get("fit", "margin"),
         }
+        retry = (("Retry-After", str(SIZING_RETRY_SECONDS)),)
+        if not sizing_slot.acquire(timeout=SIZING_WAIT_SECONDS):
+            self._send_json({"error": "Another nozzle sizing is running; try again in a few seconds"},
+                            503, headers=retry)
+            return
+        deadline = time.monotonic() + SIZING_DEADLINE_SECONDS
+
+        def checkpoint():
+            if self._client_gone():
+                raise SizingStopped("client gone")
+            if time.monotonic() > deadline:
+                raise SizingStopped("deadline")
+
+        # Release the lock and slot before answering, never during network I/O.
+        search_lock = SearchLock(preview_lock, checkpoint)
         try:
-            with preview_lock:
-                result = size_for_nozzle(rec["svg"], settings, mode,
-                                         data.get("nozzle_mm"), data.get("tolerance_percent"))
+            response = (200, size_for_nozzle(rec["svg"], settings, mode, data.get("nozzle_mm"),
+                                             data.get("tolerance_percent"), lock=search_lock,
+                                             checkpoint=checkpoint))
+        except SizingStopped as stop:
+            response = None
+            if stop.reason == "deadline":
+                response = (503, {"error": "The server is too busy to finish sizing; try again shortly"})
         except ValueError as e:
-            self._send_error(400, str(e))
-            return
+            response = (400, {"error": str(e)})
         except (RuntimeError, OSError, cv2.error) as e:
-            self._send_error(500, f"Could not size stamp for nozzle: {e}")
-            return
-        self._send_json(result)
+            response = (500, {"error": f"Could not size stamp for nozzle: {e}"})
+        finally:
+            search_lock.close()
+            sizing_slot.release()
+        if response is not None:
+            status, payload = response
+            self._send_json(payload, status, headers=retry if status == 503 else ())
 
     # ── POST /stamp → starts background job, returns job_id ──
 

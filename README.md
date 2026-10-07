@@ -49,7 +49,7 @@ If native tools are already installed, use `bash processor/setup.sh`. An alterna
 | Python 3.13 | Isolated application runtime | `python@3.13` |
 | potrace | Bitmap → SVG tracing | `potrace` |
 | Ghostscript (`gs`) | EPS/PS/AI rasterization through Pillow | `ghostscript` |
-| `rsvg-convert` | SVG upload previews | `librsvg` |
+| `rsvg-convert` | SVG upload previews; round full-bleed measurement | `librsvg` |
 | OpenSCAD | SVG → printable geometry | `openscad@snapshot` cask |
 
 On Linux, install Python 3.13 with venv/pip support plus `potrace`, `ghostscript`, `librsvg2-bin`, and `openscad` through your distribution's package manager, then run `bash processor/setup.sh`. Automatic native installation is macOS-only.
@@ -200,7 +200,7 @@ All sizing controls are in **millimeters**. Width and face height describe the o
 
 ### Full bleed
 
-**Full bleed: fit to edge** removes the margin and scales the artwork uniformly until its ink meets the body edge. A rectangular body meets it on the artwork's tighter axis; an **Auto** body matches the artwork, so it meets all four edges unless the 12 mm minimum height applies. A round body fits the farthest ink to the circle, measured from the rendered artwork's center rather than its bounding-box corners, so a circular motif fills a round stamp. Nothing is trimmed beyond sub-pixel rounding at the edge.
+**Full bleed: fit to edge** removes the margin and scales the artwork uniformly until its ink meets the body edge. A rectangular body meets it on the artwork's tighter axis; an **Auto** body matches the artwork, so it meets all four edges unless the 12 mm minimum height applies. A round body fits the farthest artwork to the circle, measured from the artwork's own center rather than at its bounding-box corners, so a circular motif fills a round stamp and nothing is trimmed. Traced artwork, which is everything the web app and PNG input produce, is measured from a fast rendering; it errs outward by up to about 0.15%, leaving at most a hairline gap at the edge. Any other SVG given to `png2stamp.sh` is measured on the shapes OpenSCAD imports for the stamp, which is exact but can take minutes for dense artwork. OpenSCAD builds what it imports, not what a viewer shows: it ignores color, opacity, clipping, filters and text, so convert text to paths and remove hidden shapes first.
 
 **Full bleed: fill face** covers the whole face, like a photo cropped to a frame, and trims whatever extends past the edge. Fill is rejected if it would enlarge the artwork beyond 200 mm; use fit, or a body closer to the artwork's proportions.
 
@@ -210,7 +210,7 @@ In both full-bleed fits, reinforcement and the concave cavity mouth are trimmed 
 
 **Scale up for nozzle** finds the smallest body at which the chosen nozzle's **lost** and **extra** percentages, as reported by **Compare nozzles**, are both at or below the allowance: 0.5%, 1%, 2% (default), or 5%. Candidate sizes are whole tenths of a millimeter, judged by the same estimate as the comparison cards, so comparing after scaling shows the same numbers while **Preserve thin strokes** is off. Rectangular bodies keep their proportions; auto and round bodies change width or diameter. Face mode, artwork fit, and reinforcement are included; **Preserve thin strokes** is not, so the size is the one at which the artwork itself survives.
 
-It only grows the stamp. If the current size already passes, it is kept, and the smallest size it keeps passing down to is reported. Otherwise it tries sizes upward from the current one; if none passes up to the 200 mm limit, the size is left unchanged and the result at the largest size is reported. Try a finer nozzle, a larger allowance, full bleed, or fuzzing. Artwork too fine to cover a single 0.05 mm sample at a given size counts as entirely lost there, in both the sizing and the comparison.
+One search runs at a time on the server; another waits up to a few seconds, then is told to retry. A search that cannot finish within 100 seconds on a busy server stops with a message to try again, and a search whose page has moved on stops early. It only grows the stamp. If the current size already passes, it is kept, and the smallest size it keeps passing down to is reported. Otherwise it tries sizes upward from the current one; if none passes up to the 200 mm limit, the size is left unchanged and the result at the largest size is reported. Try a finer nozzle, a larger allowance, full bleed, or fuzzing. Artwork too fine to cover a single 0.05 mm sample at a given size counts as entirely lost there, in both the sizing and the comparison.
 
 The percentages are area-based. A disk-shaped nozzle also rounds sharp corners and trims tapering tips at any size, so artwork with many points or very fine texture, such as needles or fractal branching, may need a larger allowance. Very fine source detail may not pass within 200 mm at all. As with the comparison, this is an estimate, not a slicer simulation.
 

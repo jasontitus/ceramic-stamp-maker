@@ -8,6 +8,7 @@ Stroke preservation is deliberately excluded: the answer is the size at which
 the artwork itself survives, without selective widening.
 """
 
+import contextlib
 import math
 
 from print_preview import NOZZLES_MM, nozzle_detail
@@ -49,7 +50,8 @@ def _bisect(evaluate, failing, passing):
     return passing
 
 
-def size_for_nozzle(svg_content, settings, mode, nozzle_mm, tolerance_percent):
+def size_for_nozzle(svg_content, settings, mode, nozzle_mm, tolerance_percent,
+                    lock=contextlib.nullcontext(), checkpoint=lambda: None):
     """Return the current size's detail and the smallest passing body size.
 
     ``settings`` holds the resolver arguments (``width_mm``, ``height_mm``,
@@ -70,6 +72,10 @@ def size_for_nozzle(svg_content, settings, mode, nozzle_mm, tolerance_percent):
     sizes. The search therefore walks a geometric ladder away from the current
     size, stops at the first change of verdict, and bisects that bracket. The
     returned size always passed an actual evaluation.
+
+    ``lock`` is held around each full-resolution evaluation, not the whole
+    search, so a server can bound memory without starving other previews.
+    ``checkpoint`` runs before each evaluation and may raise to stop the search.
     """
     if isinstance(nozzle_mm, bool) or nozzle_mm not in NOZZLES_MM:
         raise ValueError("nozzle_mm must be one of " + ", ".join(f"{n:g}" for n in NOZZLES_MM))
@@ -88,7 +94,9 @@ def size_for_nozzle(svg_content, settings, mode, nozzle_mm, tolerance_percent):
         return resolve_dimensions(svg_content, **{**settings, "width_mm": _mm(steps), "height_mm": height})
 
     def judge(dimensions):
-        lost, gained = nozzle_detail(svg_content, dimensions, mode, nozzle_mm)
+        checkpoint()
+        with lock:
+            lost, gained = nozzle_detail(svg_content, dimensions, mode, nozzle_mm)
         return {"dimensions": dimensions, "lost_percent": lost, "gained_percent": gained,
                 "passes": lost <= tolerance_percent and gained <= tolerance_percent}
 

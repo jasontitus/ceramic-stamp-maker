@@ -44,7 +44,8 @@ usage() {
     echo "  fit           margin (default): 1.5mm border around the artwork"
     echo "                bleed: artwork scaled to meet the body edge, no margin"
     echo "                fill: artwork covers the whole face; overflow trimmed"
-    echo "                (round + bleed measures the ink with rsvg-convert)"
+    echo "                (round + bleed: SVGs not traced by potrace are measured with"
+    echo "                 OpenSCAD, exactly but slowly for dense artwork)"
     echo ""
     echo "Produces:"
     echo "  *_stamp.3mf   - Bambu Studio project (open directly, settings included)"
@@ -108,6 +109,8 @@ if [[ -z "${OPENSCAD:-}" ]]; then
         OPENSCAD="openscad"
     fi
 fi
+# stamp_geometry.py measures round full-bleed artwork with this same renderer.
+export OPENSCAD
 
 MISSING=()
 if ! $SVG_INPUT; then

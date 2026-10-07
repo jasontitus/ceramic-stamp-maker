@@ -1,8 +1,8 @@
 """Full-bleed artwork fits and nozzle-driven body sizing."""
 
 import math
-import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -12,10 +12,13 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 import numpy as np
+from unittest import mock
 
+import stamp_geometry
 from nozzle_sizing import size_for_nozzle
 from print_preview import build_print_preview, nozzle_detail
-from stamp_geometry import MARGIN_MM, MOUTH_MM, ink_radius_mm, resolve_dimensions, scad_source
+from stamp_geometry import (MARGIN_MM, MOUTH_MM, ink_radius_mm, openscad_binary,
+                            resolve_dimensions, scad_source)
 
 
 # 2:1 landscape rectangle filling its whole viewport.
@@ -35,6 +38,16 @@ DIAMOND = ('<svg xmlns="http://www.w3.org/2000/svg" width="80pt" height="10pt" '
            'viewBox="0 0 80 10"><path d="M0 5L40 0L80 5L40 10Z" fill="black"/></svg>')
 PT = 25.4 / 72
 INCIRCLE_40 = 20 * math.cos(math.pi / 256)
+
+
+# Skip only when no renderer is installed; a broken one must fail loudly.
+needs_openscad = unittest.skipUnless(shutil.which(openscad_binary()), "OpenSCAD is required")
+POTRACE_METADATA = "<metadata>Created by potrace 1.16, written by Peter Selinger 2001-2019</metadata>"
+
+
+def traced(svg):
+    """Mark an SVG as potrace output, as every SVG the app traces itself is."""
+    return svg.replace(">", ">" + POTRACE_METADATA, 1)
 
 
 def ui_value(mm):
@@ -77,6 +90,7 @@ class ArtworkFitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Fill would enlarge"):
             resolve_dimensions(SOLID, 12, 150, 20, "rectangular", "0", "fill")
 
+    @needs_openscad
     def test_round_bleed_fits_the_ink_not_its_bounding_box(self):
         margin = resolve_dimensions(DISC, 40, None, 20, "round", "0")
         bleed = resolve_dimensions(DISC, 40, None, 20, "round", "0", "bleed")
@@ -85,19 +99,22 @@ class ArtworkFitTests(unittest.TestCase):
         self.assertLessEqual(bleed["design_width_mm"], 40 * math.cos(math.pi / 256))
         self.assertGreater(bleed["design_width_mm"], 39.8)
 
+    @needs_openscad
     def test_round_bleed_keeps_pointed_tips_inside_the_circle(self):
         d = resolve_dimensions(DIAMOND, 40, None, 20, "round", "0", "bleed")
-        # The design keeps the artwork's aspect exactly; tips stay inside the body.
+        # The design keeps the artwork's aspect exactly; tips touch the body
+        # edge, to within OpenSCAD's six-digit export precision.
         self.assertAlmostEqual(d["design_width_mm"] / d["design_height_mm"], 8, places=9)
         self.assertLessEqual(d["design_width_mm"] / 2, INCIRCLE_40)
-        self.assertGreater(d["design_width_mm"] / 2, INCIRCLE_40 * 0.995)
+        self.assertGreater(d["design_width_mm"] / 2, INCIRCLE_40 * (1 - 1e-4))
         build_print_preview(DIAMOND, d, "raised")
 
+    @needs_openscad
     def test_round_bleed_measures_from_the_ink_center_like_openscad(self):
         # OpenSCAD's import(center=true) centers the shapes, not the viewport.
         corner = ('<svg xmlns="http://www.w3.org/2000/svg" width="60pt" height="60pt" '
                   'viewBox="0 0 60 60"><circle cx="10" cy="10" r="5" fill="black"/></svg>')
-        self.assertAlmostEqual(ink_radius_mm(corner), 5 * PT, delta=5 * PT * 0.02)
+        self.assertAlmostEqual(ink_radius_mm(corner), 5 * PT, delta=5 * PT * 1e-4)
         with self.assertRaisesRegex(ValueError, "Full bleed would enlarge the artwork canvas"):
             resolve_dimensions(corner, 40, None, 20, "round", "0", "bleed")
 
@@ -110,6 +127,65 @@ class ArtworkFitTests(unittest.TestCase):
             self.assertLessEqual(d["design_width_mm"], 200)
             self.assertAlmostEqual(d["design_width_mm"], 200, places=9)
         build_print_preview(bar, d, "raised")
+
+    @needs_openscad
+    def test_round_bleed_measures_the_shapes_openscad_builds(self):
+        # OpenSCAD builds the white and transparent squares but not the text,
+        # so they set the extent whatever a renderer would show.
+        disc = '<circle cx="50" cy="50" r="5" fill="black"/>'
+        for hidden in ('<rect x="0" y="0" width="100" height="100" fill="white"/>',
+                       '<rect x="0" y="0" width="100" height="100" opacity="0"/>'):
+            svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="100pt" '
+                   f'viewBox="0 0 100 100">{hidden}{disc}</svg>')
+            self.assertAlmostEqual(ink_radius_mm(svg), 50 * math.sqrt(2) * PT, delta=1e-3)
+        text = ('<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="100pt" '
+                f'viewBox="0 0 100 100">{disc}<text x="0" y="95" font-size="20">far</text></svg>')
+        self.assertAlmostEqual(ink_radius_mm(text), 5 * PT, delta=1e-3)
+
+    def test_potrace_output_is_measured_without_openscad(self):
+        # The web app's own traces take the fast raster route, to one sample.
+        with mock.patch.object(stamp_geometry, "openscad_binary", side_effect=AssertionError("OpenSCAD used")):
+            d = resolve_dimensions(traced(DIAMOND), 40, None, 20, "round", "0", "bleed")
+        self.assertAlmostEqual(d["design_width_mm"] / 2, INCIRCLE_40, delta=INCIRCLE_40 * 2 / 2048)
+        self.assertAlmostEqual(d["design_width_mm"] / d["design_height_mm"], 8, places=9)
+
+    @needs_openscad
+    def test_openscad_measurement_matches_the_stamps_own_import(self):
+        # Pixel units (dpi matters), and the farthest point on a small curved
+        # corner piece that OpenSCAD exports after the larger diamond.
+        art = ('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">'
+               '<path d="M0 100 L100 0 L200 100 L100 200 Z"/>'
+               '<path d="M300 0 C290 10 285 20 280 30 L300 30 Z"/></svg>')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            svg, scad, exported = root / "art.svg", root / "built.scad", root / "built.svg"
+            svg.write_text(art)
+            source = scad_source(svg, resolve_dimensions(art, 40, None, 20, "auto", "0"), "raised")
+            # Rebuild exactly the stamp's import, unscaled, and measure its polygons.
+            segments = re.search(r"^\$fn = .*;$", source, re.M).group(0)
+            call = re.search(r"import\(.*?\);", source).group(0)
+            scad.write_text(f"{segments}\n{call}\n")
+            subprocess.run([openscad_binary(), "-o", str(exported), "--export-format", "svg", str(scad)],
+                           check=True, capture_output=True, timeout=120)
+            numbers = [float(n) for n in re.findall(r"[-+0-9.eE]+", " ".join(
+                re.findall(r'\bd="([^"]*)"', exported.read_text())))]
+        built = max(math.hypot(x, y) for x, y in zip(numbers[0::2], numbers[1::2]))
+        measured = ink_radius_mm(art)
+        self.assertGreaterEqual(measured, built)
+        self.assertLess(measured, built * (1 + 3e-5))
+
+    def test_empty_artwork_is_an_input_error_on_both_routes(self):
+        # A trace whose specks were all dropped; text, which OpenSCAD ignores.
+        empty = ('<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="20pt" viewBox="0 0 20 20">'
+                 '<g fill="#000000" stroke="none"></g></svg>')
+        text = ('<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="20pt" viewBox="0 0 20 20">'
+                '<text x="2" y="12">hi</text></svg>')
+        routes = [traced(empty)]
+        if shutil.which(openscad_binary()):
+            routes.append(text)
+        for svg in routes:
+            with self.assertRaisesRegex(ValueError, "no shapes"):
+                resolve_dimensions(svg, 40, None, 20, "round", "0", "bleed")
 
     def test_round_fill_spans_the_diameter_on_the_shorter_axis(self):
         d = resolve_dimensions(SOLID, 30, None, 20, "round", "0", "fill")
@@ -147,11 +223,9 @@ class ArtworkFitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fit must be"):
             resolve_dimensions(SOLID, 36, None, 20, "auto", "0", "edge")
 
+    @needs_openscad
     def test_raised_bleed_export_stays_within_the_body(self):
-        app = '/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD'
-        openscad = os.environ.get('OPENSCAD') or (app if Path(app).is_file() else shutil.which('openscad'))
-        if not openscad:
-            self.skipTest('OpenSCAD is required for physical export verification')
+        openscad = openscad_binary()
         # Auto reinforcement offsets the artwork past the edge; the clip trims it.
         d = resolve_dimensions(SOLID, 30, 30, 20, "rectangular", "auto", "fill")
         self.assertGreater(d["thicken_mm"], 0)
@@ -248,6 +322,27 @@ class NozzleSizingTests(unittest.TestCase):
         result = size_for_nozzle(hair, settings(width_mm=36, fit="bleed"), "raised", 0.8, 5)
         self.assertFalse(result["achievable"])
         self.assertAlmostEqual(result["largest"]["dimensions"]["width_mm"], 200)
+
+    def test_a_checkpoint_before_each_evaluation_can_stop_the_search(self):
+        evaluations, checks = [], []
+
+        class CountingLock:
+            def __enter__(self):
+                evaluations.append(1)
+
+            def __exit__(self, *exc):
+                return False
+
+        def checkpoint():
+            checks.append(1)
+            if len(checks) == 3:
+                raise InterruptedError("stop")
+
+        with self.assertRaises(InterruptedError):
+            size_for_nozzle(BARS, settings(width_mm=14, fit="bleed"), "raised", 0.4, 1,
+                            lock=CountingLock(), checkpoint=checkpoint)
+        # Two evaluations ran; the third was stopped before taking the lock.
+        self.assertEqual(len(evaluations), 2)
 
     def test_rejects_unknown_nozzles_and_allowances(self):
         with self.assertRaisesRegex(ValueError, "nozzle_mm"):

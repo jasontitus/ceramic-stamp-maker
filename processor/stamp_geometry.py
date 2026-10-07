@@ -4,10 +4,12 @@ import argparse
 import functools
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 
@@ -21,7 +23,14 @@ MAX_DESIGN_MM = 200
 # bleed: largest uniform scale whose ink still fits; it meets the edge.
 # fill: cover the whole face uniformly; overflow is trimmed at the edge.
 FITS = ("margin", "bleed", "fill")
+_OPENSCAD_APP = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+# Every SVG the app traces itself carries potrace's own metadata comment.
+_POTRACE_MARK = "Created by potrace"
 _INK_SAMPLES = 2048
+# OpenSCAD's SVG export keeps six significant digits; round outward past that.
+_EXPORT_SLACK = 1e-5
+# A dense hand-made SVG can take minutes; the stamp build after it takes longer.
+_OPENSCAD_MEASURE_TIMEOUT = 300
 _NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 _LENGTH = re.compile(rf"({_NUMBER})\s*(px|pt|pc|in|mm|cm)?")
 _MM_PER_UNIT = {
@@ -90,16 +99,37 @@ def svg_dimensions(svg_content):
     return tuple(dimensions)
 
 
+def openscad_binary():
+    """The renderer png2stamp.sh uses: $OPENSCAD, else the macOS app, else PATH."""
+    if os.environ.get("OPENSCAD"):
+        return os.environ["OPENSCAD"]
+    if os.access(_OPENSCAD_APP, os.X_OK):
+        return _OPENSCAD_APP
+    return "openscad"
+
+
 @functools.lru_cache(maxsize=16)
 def ink_radius_mm(svg_content):
-    """Farthest ink from the ink's bounding-box center, in SVG mm, rounded outward.
+    """Farthest artwork from its own center, in SVG mm, rounded outward.
 
-    Round full-bleed bodies need the real ink extent: fitting the bounding-box
-    corners would shrink a circular motif to 71% of the diameter. OpenSCAD's
-    ``import(center=true)`` centers the imported shapes, not the viewport, so
-    distances are measured from the ink's own center. Any anti-aliased
-    coverage counts as ink, so light ink and sharp tips are not undercounted.
+    Round full-bleed bodies need the real extent: fitting the bounding-box
+    corners would shrink a circular motif to 71% of the diameter. Distances run
+    from the artwork's own center, where OpenSCAD's ``import(center=true)``
+    puts the origin.
+
+    Potrace output, which is everything the web app and PNG input produce, is
+    plain black-filled paths inside its viewport that a renderer and OpenSCAD
+    read identically, so a fast raster measurement serves; it errs outward by a
+    sample or two (about 0.15% at most). Any other SVG is measured on the shapes OpenSCAD itself imports:
+    exact, but OpenSCAD segments every curve and can take minutes on dense art.
     """
+    if _POTRACE_MARK in svg_content:
+        return _raster_ink_radius(svg_content)
+    return _openscad_ink_radius(svg_content)
+
+
+def _raster_ink_radius(svg_content):
+    """Measure rendered ink; any anti-aliased coverage counts, so tips are kept."""
     svg_width, svg_height = svg_dimensions(svg_content)
     size = ["-w", str(_INK_SAMPLES)] if svg_width >= svg_height else ["-h", str(_INK_SAMPLES)]
     try:
@@ -119,14 +149,54 @@ def ink_radius_mm(svg_content):
         raise RuntimeError("Could not decode the artwork extent rasterization")
     rows, cols = np.nonzero(raster < 255)
     if not rows.size:
-        raise ValueError("Artwork has no content to fit")
+        raise ValueError("Artwork has no shapes to fit")
     pixel_height, pixel_width = raster.shape
     center_x = (int(cols.min()) + int(cols.max()) + 1) / 2
     center_y = (int(rows.min()) + int(rows.max()) + 1) / 2
-    # Measure to each pixel's far corner so the result never undershoots.
+    # Measure to each pixel's far corner so a whole pixel is never undercounted.
     dx = (np.abs(cols + 0.5 - center_x) + 0.5) * (svg_width / pixel_width)
     dy = (np.abs(rows + 0.5 - center_y) + 0.5) * (svg_height / pixel_height)
     return float(np.sqrt(dx * dx + dy * dy).max())
+
+
+def _openscad_ink_radius(svg_content):
+    """Measure the shapes OpenSCAD imports, with the stamp's own import call.
+
+    OpenSCAD ignores color, opacity, clipping, filters and text, and keeps
+    shapes outside the viewport, so no rendering can stand in for it.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        svg_file = Path(directory) / "art.svg"
+        scad_file = Path(directory) / "extent.scad"
+        exported = Path(directory) / "extent.svg"
+        svg_file.write_text(svg_content)
+        scad_file.write_text(
+            f"$fn = {ROUND_SEGMENTS};\n"
+            f"import({json.dumps(str(svg_file), ensure_ascii=False)}, center = true, dpi = {SVG_DPI});\n",
+            encoding="utf-8")
+        try:
+            subprocess.run(
+                [openscad_binary(), "-o", str(exported), "--export-format", "svg", str(scad_file)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                timeout=_OPENSCAD_MEASURE_TIMEOUT,
+            )
+            paths = re.findall(r'\bd="([^"]*)"', exported.read_text())
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Artwork extent measurement with OpenSCAD timed out") from None
+        except subprocess.CalledProcessError as exc:
+            # Versions word "nothing was imported" differently.
+            message = exc.stderr.lower()
+            if b"empty" in message or b"not a 2d object" in message:
+                raise ValueError("Artwork has no shapes to fit") from None
+            raise RuntimeError("Could not measure artwork extent with OpenSCAD") from exc
+        except OSError as exc:
+            raise RuntimeError("Could not measure artwork extent with OpenSCAD") from exc
+    # Exported paths are M/L polygons; the farthest point of a polygon is a vertex.
+    numbers = [float(n) for n in re.findall(_NUMBER, " ".join(paths))]
+    if len(numbers) < 2:
+        raise ValueError("Artwork has no shapes to fit")
+    radius = max(math.hypot(x, y) for x, y in zip(numbers[0::2], numbers[1::2]))
+    return radius * (1 + _EXPORT_SLACK)
 
 
 def resolve_dimensions(svg_content, width_mm=36, height_mm=None,
@@ -207,8 +277,9 @@ def resolve_dimensions(svg_content, width_mm=36, height_mm=None,
                         (height - 2 * inset) / svg_height)
     longest = max(svg_width, svg_height)
     if longest * scale > MAX_DESIGN_MM:
-        # Float rounding, or a round bleed's sub-pixel ink measurement, can land
-        # just past the limit: shrink uniformly onto it. Anything more is real.
+        # Float rounding, a round bleed's one-sample raster measurement, or a
+        # canvas marginally larger than its shapes can land just past the
+        # limit: shrink uniformly onto it. Anything more is real.
         slack = 1e-9 if fit == "fill" else 1e-3
         if longest * scale > MAX_DESIGN_MM * (1 + slack):
             if fit == "fill":
